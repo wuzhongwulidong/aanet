@@ -74,7 +74,7 @@ class StereoDataset(Dataset):
             sample = dict()
 
             if self.save_filename:
-                sample['left_name'] = left_img.split('/', 1)[1]
+                sample['left_name'] = left_img.split('/', 1)[1]  # left_img.split('/', 1)即以'/'为分隔符，分割一次（即分割成两部分）
 
             sample['left'] = os.path.join(data_dir, left_img)
             sample['right'] = os.path.join(data_dir, right_img)

@@ -419,6 +419,7 @@ class AdaptiveAggregation(nn.Module):
 
         fusions = nn.ModuleList()
         for i in range(num_fusions):
+            # 共使用6个AAModules，其中最后三个使用了变形卷积
             if self.intermediate_supervision:
                 num_out_branches = self.num_scales
             else:

@@ -56,7 +56,14 @@ class DeformConv2d(nn.Module):
                                           bias=bias)
 
         k = 3 if self.modulation else 2
-
+        # offset_out_channels(论文公式4中的deltaPk)的通道数，如果不使用Mk，则为2，如果使用Mk，则包含Mk在内共3个通道（即使用一个Conv2d同时生成deltaPk和Mk）
+        # 注意仔细体会论文公式4和这里的通道数目：对于一个卷积结果像素来说，是由kernel_size*kernel_size*channel(本文中channel即为视差数)个原始像素加权求和得到的，
+        # 而每一个原始像素都需要一个deltaPk和Mk。故要得到一个卷积结果像素，就需要kernel_size*kernel_size*channel个deltaPk和Mk
+        # 再考虑到deltaPk是二维的（deltaX,deltaY），故要得到一个卷积结果像素需要kernel_size*kernel_size*channel*k(k=3)个参数。
+        # 但是考虑到，论文将channel分成几个group，且在一个group内的对应像素共享deltaPk和Mk
+        # 故要得到一个卷积结果像素，共需要kernel_size*kernel_size*deformable_groups*k个像素。该值即为生成全图的deltaPk和Mk的通道数。
+        # 作者使用通道0:(kernel_size*kernel_size*deformable_groups*2)为deltaPk通道
+        # 通道kernel_size*kernel_size*deformable_groups*2：kernel_size*kernel_size*deformable_groups*k为Mk通道
         offset_out_channels = deformable_groups * k * kernel_size * kernel_size
 
         # Group-wise offset leraning when deformable_groups > 1
@@ -73,9 +80,9 @@ class DeformConv2d(nn.Module):
             offset_mask = self.offset_conv(x)
 
             offset_channel = self.deformable_groups * 2 * self.kernel_size * self.kernel_size
-            offset = offset_mask[:, :offset_channel, :, :]
+            offset = offset_mask[:, :offset_channel, :, :]  # 论文公式4中的deltaPk
 
-            mask = offset_mask[:, offset_channel:, :, :]
+            mask = offset_mask[:, offset_channel:, :, :]  # 论文公式4中的deltaMk
             mask = mask.sigmoid()  # [0, 1]
 
             if self.double_mask:

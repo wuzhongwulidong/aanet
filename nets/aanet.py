@@ -40,9 +40,9 @@ class AANet(nn.Module):
 
         # Feature extractor
         if feature_type == 'stereonet':
+            self.feature_extractor = StereoNetFeature(self.num_downsample)
             self.max_disp = max_disp // (2 ** num_downsample)
             self.num_downsample = num_downsample
-            self.feature_extractor = StereoNetFeature(self.num_downsample)
         elif feature_type == 'psmnet':
             self.feature_extractor = PSMNetFeature()
             self.max_disp = max_disp // (2 ** num_downsample)
@@ -53,11 +53,14 @@ class AANet(nn.Module):
             self.feature_extractor = GANetFeature(feature_mdconv=(not no_feature_mdconv))
             self.max_disp = max_disp // 3
         elif feature_type == 'aanet':
+            # 只有AANetFeature直接返回的是三个尺度的特征。
             self.feature_extractor = AANetFeature(feature_mdconv=(not no_feature_mdconv))
             self.max_disp = max_disp // 3
         else:
             raise NotImplementedError
 
+        # self.fpn用来生成最终的num_scales=3个尺度的特征。
+        # 情形1：self.feature_extractor输出三尺度的特征：上采样和下采样同尺度间融合，输出仍是三尺度的特征。
         if feature_pyramid_network:
             if feature_type == 'aanet':
                 in_channels = [32 * 4, 32 * 8, 32 * 16, ]
@@ -65,12 +68,15 @@ class AANet(nn.Module):
                 in_channels = [32, 64, 128]
             self.fpn = FeaturePyramidNetwork(in_channels=in_channels,
                                              out_channels=32 * 4)
+        # 情形2：self.feature_extractor输出的是一个尺度的特征：需要生成三个尺度的特征。
         elif feature_pyramid:
             self.fpn = FeaturePyrmaid()
 
         # Cost volume construction
+        # 情形1：多个尺度的特征
         if feature_type == 'aanet' or feature_pyramid or feature_pyramid_network:
             cost_volume_module = CostVolumePyramid
+        # 情形2：只有单尺度的特征
         else:
             cost_volume_module = CostVolume
         self.cost_volume = cost_volume_module(self.max_disp,
@@ -183,7 +189,6 @@ class AANet(nn.Module):
             elif self.refinement_type in ['stereodrnet', 'hourglass']:
                 for i in range(self.num_downsample):
                     scale_factor = 1. / pow(2, self.num_downsample - i - 1)
-
                     if scale_factor == 1.0:
                         curr_left_img = left_img
                         curr_right_img = right_img
@@ -206,10 +211,11 @@ class AANet(nn.Module):
     def forward(self, left_img, right_img):
         left_feature = self.feature_extraction(left_img)
         right_feature = self.feature_extraction(right_img)
-        cost_volume = self.cost_volume_construction(left_feature, right_feature)
+
+        cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12
         aggregation = self.aggregation(cost_volume)
-        disparity_pyramid = self.disparity_computation(aggregation)
+
+        disparity_pyramid = self.disparity_computation(aggregation)  # D/12, D/6, D/3
         disparity_pyramid += self.disparity_refinement(left_img, right_img,
                                                        disparity_pyramid[-1])
-
         return disparity_pyramid

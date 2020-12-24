@@ -20,7 +20,7 @@ def check_path(path):
 
 def save_command(save_path, filename='command_train.txt'):
     check_path(save_path)
-    command = sys.argv
+    command = sys.argv   # 一个list：启动程序的命令行（类似于C++中main函数的第二个参数argv）
     save_file = os.path.join(save_path, filename)
     with open(save_file, 'w') as f:
         f.write(' '.join(command))

@@ -17,21 +17,21 @@ class Compose(object):
 
 
 class ToTensor(object):
-    """Convert numpy array to torch tensor"""
+    """Convert numpy array to torch tensor, and for left/right images do [H, W, C=3] -> [C=3, H, W]"""
 
     def __call__(self, sample):
-        left = np.transpose(sample['left'], (2, 0, 1))  # [3, H, W]
+        left = np.transpose(sample['left'], (2, 0, 1))  # [H, W, C=3] -> [C=3, H, W]
         sample['left'] = torch.from_numpy(left) / 255.
         right = np.transpose(sample['right'], (2, 0, 1))
         sample['right'] = torch.from_numpy(right) / 255.
 
         # disp = np.expand_dims(sample['disp'], axis=0)  # [1, H, W]
         if 'disp' in sample.keys():
-            disp = sample['disp']  # [H, W]
+            disp = sample['disp']     # [H, W]
             sample['disp'] = torch.from_numpy(disp)
 
         if 'pseudo_disp' in sample.keys():
-            disp = sample['pseudo_disp']  # [H, W]
+            disp = sample['pseudo_disp']     # [H, W]
             sample['pseudo_disp'] = torch.from_numpy(disp)
 
         return sample

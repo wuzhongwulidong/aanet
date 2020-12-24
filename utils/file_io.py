@@ -65,7 +65,7 @@ def _read_pfm(file):
     shape = (height, width, 3) if color else (height, width)
 
     data = np.reshape(data, shape)
-    data = np.flipud(data)
+    data = np.flipud(data)  # 注意:只是在第一个维度上进行上下颠倒哦.
     return data, scale
 
 
@@ -103,5 +103,5 @@ def write_pfm(file, image, scale=1):
 
 def _read_kitti_disp(filename):
     depth = np.array(Image.open(filename))
-    depth = depth.astype(np.float32) / 256.
+    depth = depth.astype(np.float32) / 256.  # KITTI数据集的视差是uint16类型，需要除以256.0,才是真正的视差值[0,255.0]。
     return depth

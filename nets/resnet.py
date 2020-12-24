@@ -112,7 +112,7 @@ class AANetFeature(nn.Module):
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
 
-        layers = [3, 4, 6]  # ResNet-40
+        layers = [3, 4, 6]  # ResNet-40。  Bottleneck的数量
 
         # self.inplanes = 64
         self.inplanes = in_channels
@@ -151,6 +151,15 @@ class AANetFeature(nn.Module):
                     nn.init.constant_(m.bn2.weight, 0)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
+        """
+        按照要求组装
+        :param block: 网络模块（nn.Module的子类）
+        :param planes: 输出通道数
+        :param blocks: 使用block的数量
+        :param stride: 卷积步长
+        :param dilate: 卷积膨胀参数。
+        :return: 组装好的网络层
+        """
         norm_layer = self._norm_layer
         downsample = None
         previous_dilation = self.dilation
@@ -158,7 +167,9 @@ class AANetFeature(nn.Module):
             self.dilation *= stride
             stride = 1
         if stride != 1 or self.inplanes != planes * block.expansion:
+            # Bottleneck的Skip Connecttion
             downsample = nn.Sequential(
+                # 1x1卷积（若stride>1，则同时又下采样的作用），输出通道数增大block.expansion倍（4倍）
                 conv1x1(self.inplanes, planes * block.expansion, stride),
                 norm_layer(planes * block.expansion),
             )

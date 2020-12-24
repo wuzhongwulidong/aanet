@@ -142,8 +142,8 @@ class HourglassRefinement(nn.Module):
         self.final_conv = nn.Conv2d(32, 1, 3, 1, 1)
 
     def forward(self, low_disp, left_img, right_img):
-
         assert low_disp.dim() == 3
+
         low_disp = low_disp.unsqueeze(1)  # [B, 1, H, W]
         scale_factor = left_img.size(-1) / low_disp.size(-1)
         if scale_factor == 1.0:
@@ -157,6 +157,7 @@ class HourglassRefinement(nn.Module):
         error = warped_right - left_img  # [B, C, H, W]
         concat1 = torch.cat((error, left_img), dim=1)  # [B, 6, H, W]
         conv1 = self.conv1(concat1)  # [B, 16, H, W]
+
         conv2 = self.conv2(disp)  # [B, 16, H, W]
         x = torch.cat((conv1, conv2), dim=1)  # [B, 32, H, W]
 

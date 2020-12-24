@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.nn.modules.utils import _pair, _single
-
+# 将包含cpp、cuda代码的.so库导入python
 from . import deform_conv_cuda
 
 
@@ -172,7 +172,7 @@ class ModulatedDeformConvFunction(Function):
 
     @staticmethod
     def _infer_shape(ctx, input, weight):
-        n = input.size(0)
+        n = input.size(0)    # input.shape=[B, C, H, W]
         channels_out = weight.size(0)
         height, width = input.shape[2:4]
         kernel_h, kernel_w = weight.shape[2:4]

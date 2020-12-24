@@ -195,7 +195,7 @@ def main():
             if not args.count_time:
                 if args.save_type == 'pfm':
                     if args.visualize:
-                        skimage.io.imsave(save_name, (disp * 256.).astype(np.uint16))
+                        skimage.io.imsave(save_name, (disp * 256.).astype(np.uint16))  # 乘以256.0，是为了和KITTI的原始视差图格式保持一致。
 
                     save_name = save_name[:-3] + 'pfm'
                     write_pfm(save_name, disp)

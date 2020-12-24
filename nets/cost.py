@@ -20,7 +20,7 @@ class CostVolume(nn.Module):
         b, c, h, w = left_feature.size()
 
         if self.feature_similarity == 'difference':
-            cost_volume = left_feature.new_zeros(b, c, self.max_disp, h, w)
+            cost_volume = left_feature.new_zeros(b, c, self.max_disp, h, w)  # [B, D ,H, W] D=192/3
 
             for i in range(self.max_disp):
                 if i > 0:
@@ -29,7 +29,7 @@ class CostVolume(nn.Module):
                     cost_volume[:, :, i, :, :] = left_feature - right_feature
 
         elif self.feature_similarity == 'concat':
-            cost_volume = left_feature.new_zeros(b, 2 * c, self.max_disp, h, w)
+            cost_volume = left_feature.new_zeros(b, 2 * c, self.max_disp, h, w)  # [B, 2C, D, H, W]
             for i in range(self.max_disp):
                 if i > 0:
                     cost_volume[:, :, i, :, i:] = torch.cat((left_feature[:, :, :, i:], right_feature[:, :, :, :-i]),
@@ -38,11 +38,11 @@ class CostVolume(nn.Module):
                     cost_volume[:, :, i, :, :] = torch.cat((left_feature, right_feature), dim=1)
 
         elif self.feature_similarity == 'correlation':
-            cost_volume = left_feature.new_zeros(b, self.max_disp, h, w)
+            cost_volume = left_feature.new_zeros(b, self.max_disp, h, w)  # [B, D ,H, W] D=192/3
 
             for i in range(self.max_disp):
                 if i > 0:
-                    cost_volume[:, i, :, i:] = (left_feature[:, :, :, i:] *
+                    cost_volume[:, i, :, i:] = (left_feature[:, :, :, i:] *  # left_feature.shape=[B, C, H, W]
                                                 right_feature[:, :, :, :-i]).mean(dim=1)
                 else:
                     cost_volume[:, i, :, :] = (left_feature * right_feature).mean(dim=1)
@@ -67,6 +67,7 @@ class CostVolumePyramid(nn.Module):
         cost_volume_pyramid = []
         for s in range(num_scales):
             max_disp = self.max_disp // (2 ** s)
+            # 注意这里CostVolume层的定义：因为CostVolume层中没有需要训练的参数，所以不必要把它保存在self中。否则，必须保存在self中
             cost_volume_module = CostVolume(max_disp, self.feature_similarity)
             cost_volume = cost_volume_module(left_feature_pyramid[s],
                                              right_feature_pyramid[s])

@@ -76,10 +76,10 @@ parser.add_argument('--highest_loss_only', action='store_true', help='Only use l
 parser.add_argument('--load_pseudo_gt', action='store_true', help='Load pseudo gt for supervision')
 
 # Log
-parser.add_argument('--print_freq', default=100, type=int, help='Print frequency to screen (iterations)')
+parser.add_argument('--print_freq', default=50, type=int, help='Print frequency to screen (iterations)')
 parser.add_argument('--summary_freq', default=100, type=int, help='Summary frequency to tensorboard (iterations)')
 parser.add_argument('--no_build_summary', action='store_true', help='Dont save sammary when training to save space')
-parser.add_argument('--save_ckpt_freq', default=10, type=int, help='Save checkpoint frequency (epochs)')
+parser.add_argument('--save_ckpt_freq', default=5, type=int, help='Save checkpoint frequency (epochs)')
 
 parser.add_argument('--evaluate_only', action='store_true', help='Evaluate pretrained models')
 parser.add_argument('--no_validate', action='store_true', help='No validation')
@@ -102,7 +102,7 @@ def main():
     torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -110,8 +110,8 @@ def main():
     train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
                             transforms.RandomColor(),
                             transforms.RandomVerticalFlip(),
-                            transforms.ToTensor(),
-                            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
+                            transforms.ToTensor(),  # 将图像数据转化为Tensor并除以255.0，将像素数值范围归一化到[0,1]之间且[H, W, C=3]->[C=3, H, W]
+                            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)  # 使用ImageNet数据集的均值和方差再做归一化
                             ]
     train_transform = transforms.Compose(train_transform_list)
 
@@ -173,7 +173,7 @@ def main():
     num_params = utils.count_parameters(aanet)
     logger.info('=> Number of trainable parameters: %d' % num_params)
     save_name = '%d_parameters' % num_params
-    open(os.path.join(args.checkpoint_dir, save_name), 'a').close()
+    open(os.path.join(args.checkpoint_dir, save_name), 'a').close()  # 这是个空文件，只是通过其文件名称指示模型有多少个需要训练的参数
 
     # Optimizer
     # Learning rate for offset learning is set 0.1 times those of existing layers
@@ -195,11 +195,10 @@ def main():
 
     # Resume training
     if args.resume:
-        # AANet
+        # 1. resume AANet
         start_epoch, start_iter, best_epe, best_epoch = utils.resume_latest_ckpt(
             args.checkpoint_dir, aanet, 'aanet')
-
-        # Optimizer
+        # 2. resume Optimizer
         utils.resume_latest_ckpt(args.checkpoint_dir, optimizer, 'optimizer')
     else:
         start_epoch = 0
@@ -215,10 +214,10 @@ def main():
             lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                                 milestones=milestones,
                                                                 gamma=args.lr_decay_gamma,
-                                                                last_epoch=last_epoch)
+                                                                last_epoch=last_epoch)  # 最后这个last_epoch参数很重要：如果是resume的话，则会自动调整学习率适去应last_epoch。
         else:
             raise NotImplementedError
-
+    # model.Model(object)对AANet做了进一步封装。
     train_model = model.Model(args, logger, optimizer, aanet, device, start_iter, start_epoch,
                               best_epe=best_epe, best_epoch=best_epoch)
 
@@ -228,13 +227,13 @@ def main():
         assert args.val_batch_size == 1
         train_model.validate(val_loader)
     else:
-        for _ in range(start_epoch, args.max_epoch):
+        for _ in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
             if not args.evaluate_only:
                 train_model.train(train_loader)
             if not args.no_validate:
                 train_model.validate(val_loader)
             if args.lr_scheduler_type is not None:
-                lr_scheduler.step()
+                lr_scheduler.step()  # 调整Learning Rate
 
         logger.info('=> End training\n\n')
 

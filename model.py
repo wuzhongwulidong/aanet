@@ -33,15 +33,15 @@ class Model(object):
         steps_per_epoch = len(train_loader)
         device = self.device
 
-        self.aanet.train()
+        self.aanet.train()  # 设置模型为训练模式！
 
         if args.freeze_bn:
             def set_bn_eval(m):
-                classname = m.__class__.__name__
+                classname = m.__class__.__name__  # 实例调用__class__属性时会指向该实例对应的类。.__class__将实例变量指向类，然后再去调用__name__类属性
                 if classname.find('BatchNorm') != -1:
                     m.eval()
 
-            self.aanet.apply(set_bn_eval)
+            self.aanet.apply(set_bn_eval)  # apply(fn: Callable[Module, None])：Applies fn recursively to every submodule (as returned by .children()) as well as self. Typical use includes initializing the parameters of a model (see also torch.nn.init).
 
         # Learning rate summary
         base_lr = self.optimizer.param_groups[0]['lr']
@@ -56,13 +56,13 @@ class Model(object):
             right = sample['right'].to(device)
             gt_disp = sample['disp'].to(device)  # [B, H, W]
 
-            mask = (gt_disp > 0) & (gt_disp < args.max_disp)
+            mask = (gt_disp > 0) & (gt_disp < args.max_disp)  # KITTI数据集约定：视差为0，表示无效视差。
 
             if args.load_pseudo_gt:
                 pseudo_gt_disp = sample['pseudo_disp'].to(device)
-                pseudo_mask = (pseudo_gt_disp > 0) & (pseudo_gt_disp < args.max_disp) & (~mask)  # inverse mask
+                pseudo_mask = (pseudo_gt_disp > 0) & (pseudo_gt_disp < args.max_disp) & (~mask)  # inverse mask # 需要修补的像素位置的mask
 
-            if not mask.any():
+            if not mask.any():  # np.array.any()是或操作，任意一个元素为True，输出为True。
                 continue
 
             pred_disp_pyramid = self.aanet(left, right)  # list of H/12, H/6, H/3, H/2, H
@@ -95,7 +95,7 @@ class Model(object):
                 if pred_disp.size(-1) != gt_disp.size(-1):
                     pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
                     pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
-                                              mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))
+                                              mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))  # 最后乘上这一项是必须的。因为图像放大，视差要相应增大。
                     pred_disp = pred_disp.squeeze(1)  # [B, H, W]
 
                 curr_loss = F.smooth_l1_loss(pred_disp[mask], gt_disp[mask],
@@ -129,9 +129,9 @@ class Model(object):
 
             if self.num_iter % args.summary_freq == 0:
                 img_summary = dict()
-                img_summary['left'] = left
-                img_summary['right'] = right
-                img_summary['gt_disp'] = gt_disp
+                img_summary['left'] = left    # [B, C=3, H, W]
+                img_summary['right'] = right  # [B, C=3, H, W]
+                img_summary['gt_disp'] = gt_disp  # [B, H, W]
 
                 if args.load_pseudo_gt:
                     img_summary['pseudo_gt_disp'] = pseudo_gt_disp
@@ -139,7 +139,7 @@ class Model(object):
                 # Save pyramid disparity prediction
                 for s in range(len(pred_disp_pyramid)):
                     # Scale from low to high, reverse
-                    save_name = 'pred_disp' + str(len(pred_disp_pyramid) - s - 1)
+                    save_name = 'pred_disp' + str(len(pred_disp_pyramid) - s - 1)  # pred_disp0-->pred_disp4：高分辨率->低分辨率
                     save_value = pred_disp_pyramid[s]
                     img_summary[save_name] = save_value
 
@@ -150,7 +150,7 @@ class Model(object):
                     pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
                                               mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))
                     pred_disp = pred_disp.squeeze(1)  # [B, H, W]
-                img_summary['disp_error'] = disp_error_img(pred_disp, gt_disp)
+                img_summary['disp_error'] = disp_error_img(pred_disp, gt_disp)  # [B, C=3, H, W]
 
                 save_images(self.train_writer, 'train', img_summary, self.num_iter)
 
@@ -162,13 +162,13 @@ class Model(object):
 
                 # Save loss of different scale
                 for s in range(len(pyramid_loss)):
-                    save_name = 'train/loss' + str(len(pyramid_loss) - s - 1)
+                    save_name = 'train/loss' + str(len(pyramid_loss) - s - 1)  # loss0-->loss4：低分辨率~高分辨率
                     save_value = pyramid_loss[s]
                     self.train_writer.add_scalar(save_name, save_value, self.num_iter)
 
-                d1 = d1_metric(pred_disp, gt_disp, mask)
+                d1 = d1_metric(pred_disp, gt_disp, mask)   # pred_disp.shape=[B, H, W], gt_disp.shape=[B, H, W]
                 self.train_writer.add_scalar('train/d1', d1.item(), self.num_iter)
-                thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)
+                thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)  # mask.shape=[B, H, W]
                 thres2 = thres_metric(pred_disp, gt_disp, mask, 2.0)
                 thres3 = thres_metric(pred_disp, gt_disp, mask, 3.0)
                 self.train_writer.add_scalar('train/thres1', thres1.item(), self.num_iter)
@@ -177,6 +177,12 @@ class Model(object):
 
         self.epoch += 1
 
+        # 一个epoch结束：
+        # args.no_validate=False,则后面不会做self.validate()，故需要在此处记录如下信息。
+        # args.no_validate=True,则后面会做self.validate()，会在elf.validate()中记录如下信息，此处不必记录。
+        # 需记录的信息包括：
+        # 1.最新的训练的模型和状态(写入aanet_latest.pth、optimizer_latest.pth文件) for resuming training;
+        # 2.Save checkpoint of specific epoch.
         # Always save the latest model for resuming training
         if args.no_validate:
             utils.save_checkpoint(args.checkpoint_dir, self.optimizer, self.aanet,
@@ -199,7 +205,7 @@ class Model(object):
         args = self.args
         logger = self.logger
         logger.info('=> Start validation...')
-
+        # 只做evaluate，则需要从文件加载训练好的模型。否则，直接使用本model类中保存的(尚未完成全部的Epoach训练的)self.aanet即可。
         if args.evaluate_only is True:
             if args.pretrained_aanet is not None:
                 pretrained_aanet = args.pretrained_aanet

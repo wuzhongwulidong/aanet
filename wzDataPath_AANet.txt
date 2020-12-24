@@ -1,0 +1,166 @@
+# AAnet作者原代码对数据集目录的要求（见文件最后的目录结构示意图）：
+# Scene FLow, 以FlyingThings3D中一张图为例：
+'data/SceneFlow/FlyingThings3D/frames_finalpass/TRAIN/C/0740/left/0014.png'
+'data/SceneFlow/FlyingThings3D/frames_finalpass/TRAIN/C/0740/right/0014.png'
+'data/SceneFlow/FlyingThings3D/disparity/TRAIN/C/0740/left/0014.pfm'
+其中：
+    1.从train.py中的argparse获得：
+        --data_dir='data/SceneFlow' 我的SceneFlow数据目录是：/home1/wzHD/dataSets_for_run/SceneFlow/RGB_images_finallpass, 可以建立软链接
+    2.从filenames/SceneFlow_finalpass_train.txt获得:
+        FlyingThings3D/frames_finalpass/TRAIN/C/0740/left/0014.png
+        FlyingThings3D/frames_finalpass/TRAIN/C/0740/right/0014.png
+        FlyingThings3D/disparity/TRAIN/C/0740/left/0014.pfm
+
+# KITTI 2012 & 2015 MIX, 以其中两张图为例：
+data/KITTI/kitti_2012/data_stereo_flow/training/colored_0/000001_10.png
+data/KITTI/kitti_2012/data_stereo_flow/training/colored_1/000001_10.png
+data/KITTI/kitti_2012/data_stereo_flow/training/disp_occ/000001_10.png
+data/KITTI/kitti_2015/data_scene_flow/training/image_2/000000_10.png
+data/KITTI/kitti_2015/data_scene_flow/training/image_3/000000_10.png
+data/KITTI/kitti_2015/data_scene_flow/training/disp_occ_0/000000_10.png
+其中：
+    1.从启动脚本train.sh获得：
+        --data_dir='data/KITTI'  # 我的KITTI数据集目录为：~/dataSets_for_run/KITTI/Stereo_Evaluation_2012、Stereo_Evaluation_2015
+    2.从filenames/KITTI_mix.txt获得:
+        kitti_2012/data_stereo_flow/training/colored_0/000000_10.png
+        kitti_2012/data_stereo_flow/training/colored_1/000000_10.png
+        kitti_2012/data_stereo_flow/training/disp_occ/000000_10.png
+        kitti_2015/data_scene_flow/training/image_2/000000_10.png
+        kitti_2015/data_scene_flow/training/image_3/000000_10.png
+        kitti_2015/data_scene_flow/training/disp_occ_0/000000_10.png
+
+# KITTI 2012, 以其中一张图为例：
+data/KITTI/kitti_2012/data_stereo_flow/training/colored_0/000001_10.png
+data/KITTI/kitti_2012/data_stereo_flow/training/colored_1/000001_10.png
+data/KITTI/kitti_2012/data_stereo_flow/training/disp_occ/000001_10.png
+其中：
+    1.从启动脚本train.sh获得：
+        --data_dir='data/KITTI/kitti_2012/data_stereo_flow'
+    2.从filenames/KITTI_2012_train.txt获得:
+        training/colored_0/000000_10.png
+        training/colored_1/000000_10.png
+        training/disp_occ/000000_10.png
+
+# KITTI 2015, 以其中一张图为例：
+data/KITTI/kitti_2015/data_scene_flow/training/image_2/000001_10.png
+data/KITTI/kitti_2015/data_scene_flow/training/image_3/000001_10.png
+data/KITTI/kitti_2015/data_scene_flow/training/disp_occ_0/000001_10.png
+其中：
+    1.从启动脚本train.sh获得：
+        --data_dir='data/KITTI/kitti_2015/data_scene_flow'
+    2.从filenames/KITTI_2015_train.txt获得:
+        training/image_2/000001_10.png
+        training/image_3/000001_10.png
+        training/disp_occ_0/000001_10.png
+
+
+# 我的SceneFlow数据集目录结构
+wz@ubuntu:~/dataSets_for_run/SceneFlow/RGB_images_finallpass
+├── Driving
+│   ├── disparity
+│   │   ├── 15mm_focallength
+│   │   └── 35mm_focallength
+│   └── frames_finalpass
+│       ├── 15mm_focallength
+│       └── 35mm_focallength
+├── FlyingThings3D
+│   ├── disparity
+│   │   ├── TEST 下有A、B、C三个目录
+│   │   └── TRAIN 下有A、B、C三个目录
+│   └── frames_finalpass
+│       ├── TEST 下有A、B、C三个目录
+│       └── TRAIN 下有A、B、C三个目录
+└── Monkaa
+    ├── disparity
+    │   ├── a_rain_of_stones_x2
+    │   ├── copy.sh
+    │   ├── eating_camera2_x2
+    │   ├── eating_naked_camera2_x2
+    │   ├── eating_x2
+    │   ├── family_x2
+    │   ├── flower_storm_augmented0_x2
+    │   ├── flower_storm_augmented1_x2
+    │   ├── flower_storm_x2
+    │   ├── funnyworld_augmented0_x2
+    │   ├── funnyworld_augmented1_x2
+    │   ├── funnyworld_camera2_augmented0_x2
+    │   ├── funnyworld_camera2_augmented1_x2
+    │   ├── funnyworld_camera2_x2
+    │   ├── funnyworld_x2
+    │   ├── lonetree_augmented0_x2
+    │   ├── lonetree_augmented1_x2
+    │   ├── lonetree_difftex2_x2
+    │   ├── lonetree_difftex_x2
+    │   ├── lonetree_winter_x2
+    │   ├── lonetree_x2
+    │   ├── top_view_x2
+    │   ├── treeflight_augmented0_x2
+    │   ├── treeflight_augmented1_x2
+    │   └── treeflight_x2
+    └── frames_finalpass
+        ├── a_rain_of_stones_x2
+        ├── eating_camera2_x2
+        ├── eating_naked_camera2_x2
+        ├── eating_x2
+        ├── family_x2
+        ├── flower_storm_augmented0_x2
+        ├── flower_storm_augmented1_x2
+        ├── flower_storm_x2
+        ├── funnyworld_augmented0_x2
+        ├── funnyworld_augmented1_x2
+        ├── funnyworld_camera2_augmented0_x2
+        ├── funnyworld_camera2_augmented1_x2
+        ├── funnyworld_camera2_x2
+        ├── funnyworld_x2
+        ├── lonetree_augmented0_x2
+        ├── lonetree_augmented1_x2
+        ├── lonetree_difftex2_x2
+        ├── lonetree_difftex_x2
+        ├── lonetree_winter_x2
+        ├── lonetree_x2
+        ├── top_view_x2
+        ├── treeflight_augmented0_x2
+        ├── treeflight_augmented1_x2
+        └── treeflight_x2
+
+# 我的KITTI数据集目录结构
+wz@ubuntu:~/dataSets_for_run/KITTI$ tree -L 4.
+├── Stereo_Evaluation_2012
+│   └── data_stereo_flow
+│   	├── testing
+│   	│   ├── calib
+│   	│   ├── colored_0
+│   	│   ├── colored_1
+│   	│   ├── image_0
+│   	│   └── image_1
+│   	└── training
+│   	    ├── calib
+│   	    ├── colored_0
+│   	    ├── colored_1
+│   	    ├── disp_noc
+│   	    ├── disp_occ
+│   	    ├── disp_refl_noc
+│   	    ├── disp_refl_occ
+│   	    ├── flow_noc
+│   	    ├── flow_occ
+│   	    ├── image_0
+│   	    └── image_1
+└── Stereo_Evaluation_2015
+    └── data_scene_flow
+		├── testing
+		│   ├── image_2
+		│   └── image_3
+		└── training
+			├── disp_noc_0
+			├── disp_noc_1
+			├── disp_occ_0
+			├── disp_occ_1
+			├── flow_noc
+			├── flow_occ
+			├── image_2
+			├── image_3
+			├── obj_map
+			├── viz_flow_occ
+			└── viz_flow_occ_dilate_1
+
+
