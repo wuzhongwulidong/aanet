@@ -29,8 +29,9 @@ def gen_error_colormap():
 
 def disp_error_img(D_est_tensor, D_gt_tensor, abs_thres=3., rel_thres=0.05, dilate_radius=1):
     """
-    error_image仅用来显示，供人观察。故为了能够看到关键误差区间，需要剔除一些视差非常大的异常点(否则就是一张黑乎乎的图)。
-    所以error_image中仅输出误差(以热力图的方式)在一定范围内的视差图（误差小于3个像素或者误差小于5%），其余的都置为0.
+    error_image仅用来显示，供人观察。具体地：
+    1.仅观察有ground_truth的像素，无ground_truth的像素的误差直接置为0，在图中显示为纯黑色。
+    2.依据预测的误差，进行着色。误差从小到大对应：蓝色到红色。误差过大的无效预测（绝对误差超过3，且相对误差超过5%），统一着色为深红色。
     :param D_est_tensor:
     :param D_gt_tensor:
     :param abs_thres:

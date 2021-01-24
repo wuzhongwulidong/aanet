@@ -1,4 +1,5 @@
 import torch
+from torch.cuda import synchronize
 from torch.utils.data import DataLoader
 
 import argparse
@@ -24,6 +25,7 @@ parser.add_argument('--data_dir', default='data/SceneFlow', type=str, help='Trai
 parser.add_argument('--dataset_name', default='SceneFlow', type=str, help='Dataset name')
 
 parser.add_argument('--batch_size', default=64, type=int, help='Batch size for training')
+parser.add_argument('--accumulation_steps', default=4, type=int, help='Batch size for training')
 parser.add_argument('--val_batch_size', default=64, type=int, help='Batch size for validation')
 parser.add_argument('--num_workers', default=8, type=int, help='Number of workers for data loading')
 parser.add_argument('--img_height', default=288, type=int, help='Image height for training')
@@ -86,7 +88,19 @@ parser.add_argument('--no_validate', action='store_true', help='No validation')
 parser.add_argument('--strict', action='store_true', help='Strict mode when loading checkpoints')
 parser.add_argument('--val_metric', default='epe', help='Validation metric to select best model')
 
+#  尝试分布式训练:
+parser.add_argument("--local_rank", type=int)  # 必须有这一句，但是local_rank是torch.distributed.launch自动分配和传入的。
+
 args = parser.parse_args()
+print("args.local_rank={}".format(args.local_rank))
+
+#  尝试分布式训练
+torch.distributed.init_process_group(backend="nccl")
+local_rank = torch.distributed.get_rank()
+torch.cuda.set_device(local_rank)
+torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
+device = torch.device("cuda", local_rank)
+
 logger = utils.get_logger()
 
 utils.check_path(args.checkpoint_dir)
@@ -101,10 +115,6 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
-
-    torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Train loader
     train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
@@ -122,9 +132,16 @@ def main():
                                           transform=train_transform)
 
     logger.info('=> {} training samples found in the training set'.format(len(train_data)))
+    #  尝试分布式训练
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, shuffle=True)
 
-    train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers, pin_memory=True, drop_last=True)
+    # train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
+    #                           num_workers=args.num_workers, pin_memory=True, drop_last=True,
+    #                           sampler=train_sampler)
+    #  尝试分布式训练
+    train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size,
+                              num_workers=args.num_workers, pin_memory=True, drop_last=True,
+                              sampler=train_sampler)
 
     # Validation loader
     val_transform_list = [transforms.RandomCrop(args.val_img_height, args.val_img_width, validate=True),
@@ -165,9 +182,16 @@ def main():
         # Enable training from a partially pretrained model
         utils.load_pretrained_net(aanet, args.pretrained_aanet, no_strict=(not args.strict))
 
+    print("local_rank=%d" % local_rank)
     if torch.cuda.device_count() > 1:
         logger.info('=> Use %d GPUs' % torch.cuda.device_count())
-        aanet = torch.nn.DataParallel(aanet)
+        # aanet = torch.nn.DataParallel(aanet)
+        #  尝试分布式训练
+        aanet = torch.nn.SyncBatchNorm.convert_sync_batchnorm(aanet)
+        aanet.to(device)
+        aanet = torch.nn.parallel.DistributedDataParallel(aanet, device_ids=[local_rank],
+                                                          output_device=local_rank)
+        synchronize()
 
     # Save parameters
     num_params = utils.count_parameters(aanet)
@@ -225,13 +249,13 @@ def main():
 
     if args.evaluate_only:
         assert args.val_batch_size == 1
-        train_model.validate(val_loader)
+        train_model.validate(val_loader)  # test模式。应该设置evaluate_only，且mode=“test”。
     else:
         for _ in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
             if not args.evaluate_only:
                 train_model.train(train_loader)
             if not args.no_validate:
-                train_model.validate(val_loader)
+                train_model.validate(val_loader)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
                 lr_scheduler.step()  # 调整Learning Rate
 

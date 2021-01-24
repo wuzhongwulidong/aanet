@@ -19,6 +19,11 @@ def check_path(path):
 
 
 def save_command(save_path, filename='command_train.txt'):
+    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
+    local_rank = torch.distributed.get_rank()
+    if local_rank != 0:
+        return
+
     check_path(save_path)
     command = sys.argv   # 一个list：启动程序的命令行（类似于C++中main函数的第二个参数argv）
     save_file = os.path.join(save_path, filename)
@@ -27,6 +32,11 @@ def save_command(save_path, filename='command_train.txt'):
 
 
 def save_args(args, filename='args.json'):
+    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
+    local_rank = torch.distributed.get_rank()
+    if local_rank != 0:
+        return
+
     args_dict = vars(args)
     check_path(args.checkpoint_dir)
     save_path = os.path.join(args.checkpoint_dir, filename)
@@ -42,6 +52,11 @@ def int_list(s):
 
 def save_checkpoint(save_path, optimizer, aanet, epoch, num_iter,
                     epe, best_epe, best_epoch, filename=None, save_optimizer=True):
+    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进程里保存模型（一般一个卡一个进程。）
+    local_rank = torch.distributed.get_rank()
+    if local_rank != 0:
+        return
+
     # AANet
     aanet_state = {
         'epoch': epoch,
@@ -72,9 +87,14 @@ def save_checkpoint(save_path, optimizer, aanet, epoch, num_iter,
 
 def load_pretrained_net(net, pretrained_path, return_epoch_iter=False, resume=False,
                         no_strict=False):
+    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
+    local_rank = torch.distributed.get_rank()
+    map_location = {'cuda:%d' % 0: 'cuda:%d' % local_rank}  # 确保模型被加载到当前进程所在的卡
+
     if pretrained_path is not None:
         if torch.cuda.is_available():
-            state = torch.load(pretrained_path, map_location='cuda')
+            # state = torch.load(pretrained_path, map_location='cuda')
+            state = torch.load(pretrained_path, map_location=map_location)
         else:
             state = torch.load(pretrained_path, map_location='cpu')
 
