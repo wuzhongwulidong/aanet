@@ -250,7 +250,7 @@ class Model(object):
 
         # 遍历验证样本或测试样本
         for i, sample in enumerate(val_loader):
-            if i % 100 == 0:
+            if (i+1) % 100 == 0:
                 logger.info('=> Validating %d/%d' % (i, num_samples))
 
             left = sample['left'].to(self.device)  # [B, 3, H, W]

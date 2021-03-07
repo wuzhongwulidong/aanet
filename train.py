@@ -91,7 +91,7 @@ parser.add_argument('--val_metric', default='epe', help='Validation metric to se
 
 #  尝试分布式训练:
 parser.add_argument("--local_rank", type=int)  # 必须有这一句，但是local_rank是torch.distributed.launch自动分配和传入的。
-parser.add_argument("--distributed", default=True, type=bool, help="use DistributedDataParallel")
+parser.add_argument("--distributed", action='store_true', help="use DistributedDataParallel")
 
 args = parser.parse_args()
 logger = utils.get_logger()

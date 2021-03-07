@@ -103,16 +103,24 @@ def load_pretrained_net(net, pretrained_path, return_epoch_iter=False, resume=Fa
 
         weights = state['state_dict'] if 'state_dict' in state.keys() else state
         # torch.save() 和 torch.load() 函数本质将模型参数转存为一个 OrderDict 字典。
-        # 但当模型是在多 GPU 方式下训练时，标识对应模型参数的 key 会自动添加上 module 中间层。
-        # 这在重新加载模型时可能造成错误，可以使用如下代码去除 module 层。
-        for k, v in weights.items():
-            name = k[7:] if 'module' in k and not resume else k
-            new_state_dict[name] = v
+        # 使用torch.nn.parallel.DistributedDataParallel或torch.nn.parallel.DistributedDataParallel包装的模型的net.state_dict()
+        # 返回的网络状态（权重）字典dict[(key,value),(key,value)]中参数名字key中都带有module字样，即形如：module.feature_extractor.conv1.0.weight
+        # 但是，当不使用DistributedDataParallel和DistributedDataParallel包装时，key不带有module字样。
+        # 所以建议net.load_state_dict使用strict=True，以立即发现网络load错误的情形。
+        # 需要注意，是否需要删除module字符串。如下代码时用于删除module字符串的。
+        # for k, v in weights.items():
+        #     name = k[7:] if 'module' in k and not resume else k
+        #     new_state_dict[name] = v
+        new_state_dict = weights
 
         if no_strict:
-            net.load_state_dict(new_state_dict, strict=False)  # ignore intermediate output
+            missing_keys, unexpected_keys = net.load_state_dict(new_state_dict, strict=False)  # ignore intermediate output
         else:
-            net.load_state_dict(new_state_dict)  # optimizer has no argument `strict`
+            missing_keys, unexpected_keys = net.load_state_dict(new_state_dict)  # optimizer has no argument `strict`
+
+        # for Debug
+        print("missing_keys:{}".format(missing_keys))  # net模型需要但是未找到的参数key
+        print("unexpected_keys:{}".format(unexpected_keys))  # new_state_dict提供的但是net模型不需要的字典key
 
         if return_epoch_iter:
             epoch = state['epoch'] if 'epoch' in state.keys() else None
