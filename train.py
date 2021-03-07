@@ -1,6 +1,7 @@
 import torch
 from torch.cuda import synchronize
 from torch.utils.data import DataLoader
+from torch import distributed
 
 import argparse
 import numpy as np
@@ -90,24 +91,35 @@ parser.add_argument('--val_metric', default='epe', help='Validation metric to se
 
 #  尝试分布式训练:
 parser.add_argument("--local_rank", type=int)  # 必须有这一句，但是local_rank是torch.distributed.launch自动分配和传入的。
+parser.add_argument("--distributed", default=True, type=bool, help="use DistributedDataParallel")
 
 args = parser.parse_args()
-print("args.local_rank={}".format(args.local_rank))
-
-#  尝试分布式训练
-torch.distributed.init_process_group(backend="nccl")
-local_rank = torch.distributed.get_rank()
-torch.cuda.set_device(local_rank)
-torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
-device = torch.device("cuda", local_rank)
-
 logger = utils.get_logger()
 
+#  尝试分布式训练
+# local_rank = torch.distributed.get_rank()
+# local_rank表示本台机器上的进程序号,是由torch.distributed.launch自动分配和传入的。
+local_rank = args.local_rank
+# 根据local_rank来设定当前使用哪块GPU
+torch.cuda.set_device(local_rank)
+device = torch.device("cuda", local_rank)
+# 初始化DDP，使用默认backend(nccl)就行
+torch.distributed.init_process_group(backend="nccl")
+# 尝试分布式训练
+local_master = True if not args.distributed else args.local_rank == 0
+
+print("args.local_rank={}".format(args.local_rank))
+# 打印所用的参数
+if local_master:
+    logger.info('[Info] used parameters: {}'.format(vars(args)))
+
+torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
+
 utils.check_path(args.checkpoint_dir)
-utils.save_args(args)
+utils.save_args(args) if local_master else None
 
 filename = 'command_test.txt' if args.mode == 'test' else 'command_train.txt'
-utils.save_command(args.checkpoint_dir, filename)
+utils.save_command(args.checkpoint_dir, filename) if local_master else None
 
 
 def main():
@@ -133,21 +145,27 @@ def main():
 
     logger.info('=> {} training samples found in the training set'.format(len(train_data)))
     #  尝试分布式训练
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, shuffle=True)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data) if args.distributed else None
 
     # train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
     #                           num_workers=args.num_workers, pin_memory=True, drop_last=True,
     #                           sampler=train_sampler)
     #  尝试分布式训练
-    train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size,
-                              num_workers=args.num_workers, pin_memory=True, drop_last=True,
+    is_shuffle = False if args.distributed else True
+    # 需要注意的是，这里的batch_size指的是每个进程下的batch_size。也就是说，总batch_size是这里的batch_size再乘以并行数(world_size)。
+    train_loader = DataLoader(dataset=train_data,
+                              batch_size=args.batch_size,
+                              num_workers=args.num_workers,
+                              shuffle=is_shuffle,
+                              pin_memory=True,
+                              drop_last=True,
                               sampler=train_sampler)
 
     # Validation loader
     val_transform_list = [transforms.RandomCrop(args.val_img_height, args.val_img_width, validate=True),
                           transforms.ToTensor(),
-                          transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
-                         ]
+                          transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]
+
     val_transform = transforms.Compose(val_transform_list)
     val_data = dataloader.StereoDataset(data_dir=args.data_dir,
                                         dataset_name=args.dataset_name,
@@ -175,20 +193,20 @@ def main():
                        mdconv_dilation=args.mdconv_dilation,
                        deformable_groups=args.deformable_groups).to(device)
 
-    logger.info('%s' % aanet)
+    logger.info('%s' % aanet) if local_master else None
 
     if args.pretrained_aanet is not None:
         logger.info('=> Loading pretrained AANet: %s' % args.pretrained_aanet)
         # Enable training from a partially pretrained model
         utils.load_pretrained_net(aanet, args.pretrained_aanet, no_strict=(not args.strict))
 
-    print("local_rank=%d" % local_rank)
-    if torch.cuda.device_count() > 1:
-        logger.info('=> Use %d GPUs' % torch.cuda.device_count())
+    aanet.to(device)
+    logger.info('=> Use %d GPUs' % torch.cuda.device_count()) if local_master else None
+    # if torch.cuda.device_count() > 1:
+    if args.distributed:
         # aanet = torch.nn.DataParallel(aanet)
         #  尝试分布式训练
         aanet = torch.nn.SyncBatchNorm.convert_sync_batchnorm(aanet)
-        aanet.to(device)
         aanet = torch.nn.parallel.DistributedDataParallel(aanet, device_ids=[local_rank],
                                                           output_device=local_rank)
         synchronize()
@@ -197,7 +215,7 @@ def main():
     num_params = utils.count_parameters(aanet)
     logger.info('=> Number of trainable parameters: %d' % num_params)
     save_name = '%d_parameters' % num_params
-    open(os.path.join(args.checkpoint_dir, save_name), 'a').close()  # 这是个空文件，只是通过其文件名称指示模型有多少个需要训练的参数
+    open(os.path.join(args.checkpoint_dir, save_name), 'a').close() if local_master else None # 这是个空文件，只是通过其文件名称指示模型有多少个需要训练的参数
 
     # Optimizer
     # Learning rate for offset learning is set 0.1 times those of existing layers
@@ -249,13 +267,17 @@ def main():
 
     if args.evaluate_only:
         assert args.val_batch_size == 1
-        train_model.validate(val_loader)  # test模式。应该设置evaluate_only，且mode=“test”。
+        train_model.validate(val_loader, local_master)  # test模式。应该设置evaluate_only，且mode=“test”。
     else:
-        for _ in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
+        for epoch in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
             if not args.evaluate_only:
-                train_model.train(train_loader)
+                # ensure distribute worker sample different data,
+                # set different random seed by passing epoch to sampler
+                if args.distributed:
+                    train_loader.sampler.set_epoch(epoch)
+                train_model.train(train_loader, local_master)
             if not args.no_validate:
-                train_model.validate(val_loader)  # 训练模式下：边训练边验证。
+                train_model.validate(val_loader, local_master)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
                 lr_scheduler.step()  # 调整Learning Rate
 

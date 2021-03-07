@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-export CUDA_VISIBLE_DEVICES=2,3
+#export CUDA_VISIBLE_DEVICES=2,3
 
 # Train on Scene Flow training set
-python -m torch.distributed.launch  --nproc_per_node 2 train.py \
+python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py \
 --mode train \
+--distributed True \
+--accumulation_steps 1 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/aanet_sceneflow \
 --batch_size 6 \
---accumulation_steps 1 \
 --val_batch_size 6 \
 --img_height 288 \
 --img_width 576 \

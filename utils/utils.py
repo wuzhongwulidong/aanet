@@ -19,10 +19,10 @@ def check_path(path):
 
 
 def save_command(save_path, filename='command_train.txt'):
-    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
-    local_rank = torch.distributed.get_rank()
-    if local_rank != 0:
-        return
+    # # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
+    # local_rank = torch.distributed.get_rank()
+    # if local_rank != 0:
+    #     return
 
     check_path(save_path)
     command = sys.argv   # 一个list：启动程序的命令行（类似于C++中main函数的第二个参数argv）
@@ -32,10 +32,10 @@ def save_command(save_path, filename='command_train.txt'):
 
 
 def save_args(args, filename='args.json'):
-    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
-    local_rank = torch.distributed.get_rank()
-    if local_rank != 0:
-        return
+    # # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
+    # local_rank = torch.distributed.get_rank()
+    # if local_rank != 0:
+    #     return
 
     args_dict = vars(args)
     check_path(args.checkpoint_dir)
@@ -52,10 +52,10 @@ def int_list(s):
 
 def save_checkpoint(save_path, optimizer, aanet, epoch, num_iter,
                     epe, best_epe, best_epoch, filename=None, save_optimizer=True):
-    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进程里保存模型（一般一个卡一个进程。）
-    local_rank = torch.distributed.get_rank()
-    if local_rank != 0:
-        return
+    # # 用于DistributedDataParallel分布式训练: 仅在local_rank为0的进程里保存模型（一般一个卡一个进程。）
+    # local_rank = torch.distributed.get_rank()
+    # if local_rank != 0:
+    #     return
 
     # AANet
     aanet_state = {
@@ -87,14 +87,14 @@ def save_checkpoint(save_path, optimizer, aanet, epoch, num_iter,
 
 def load_pretrained_net(net, pretrained_path, return_epoch_iter=False, resume=False,
                         no_strict=False):
-    # 用于DistributedDataParallel分布式训练: 仅在rank为0的进行
-    local_rank = torch.distributed.get_rank()
-    map_location = {'cuda:%d' % 0: 'cuda:%d' % local_rank}  # 确保模型被加载到当前进程所在的卡
+    # 用于DistributedDataParallel分布式训练: 仅在local_rank为0的进行
+    # local_rank = torch.distributed.local_rank()
+    # map_location = {'cuda:%d' % 0: 'cuda:%d' % local_rank}  # 确保模型被加载到当前进程所在的卡
 
     if pretrained_path is not None:
         if torch.cuda.is_available():
-            # state = torch.load(pretrained_path, map_location='cuda')
-            state = torch.load(pretrained_path, map_location=map_location)
+            state = torch.load(pretrained_path, map_location='cuda')
+            # state = torch.load(pretrained_path, map_location=map_location)
         else:
             state = torch.load(pretrained_path, map_location='cpu')
 
@@ -102,7 +102,9 @@ def load_pretrained_net(net, pretrained_path, return_epoch_iter=False, resume=Fa
         new_state_dict = OrderedDict()
 
         weights = state['state_dict'] if 'state_dict' in state.keys() else state
-
+        # torch.save() 和 torch.load() 函数本质将模型参数转存为一个 OrderDict 字典。
+        # 但当模型是在多 GPU 方式下训练时，标识对应模型参数的 key 会自动添加上 module 中间层。
+        # 这在重新加载模型时可能造成错误，可以使用如下代码去除 module 层。
         for k, v in weights.items():
             name = k[7:] if 'module' in k and not resume else k
             new_state_dict[name] = v
