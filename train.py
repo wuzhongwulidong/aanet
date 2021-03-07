@@ -145,6 +145,7 @@ def main():
 
     logger.info('=> {} training samples found in the training set'.format(len(train_data)))
     #  尝试分布式训练
+    # 注意DistributedSampler默认参数就进行了shuffle
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_data) if args.distributed else None
 
     # train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
