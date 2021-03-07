@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0,1
 
-# Train on Scene Flow training set
-python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py \
+# Train on Scene Flow training set。注意，nproc_per_node表示所用的GPU个数。
+python -m torch.distributed.launch  --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train.py \
 --mode train \
 --distributed \
 --accumulation_steps 1 \
