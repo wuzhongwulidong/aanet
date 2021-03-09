@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0
 
 # Train on Scene Flow training set。注意，nproc_per_node表示所用的GPU个数。
-python -m torch.distributed.launch  --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train.py \
+python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py \
 --mode train \
 --distributed \
---accumulation_steps 1 \
+--accumulation_steps 4 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/aanet_sceneflow \
 --batch_size 6 \
---val_batch_size 6 \
+--val_batch_size 1 \
 --img_height 288 \
 --img_width 576 \
 --val_img_height 576 \
