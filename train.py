@@ -96,19 +96,23 @@ parser.add_argument("--distributed", action='store_true', help="use DistributedD
 args = parser.parse_args()
 logger = utils.get_logger()
 
-#  尝试分布式训练
-# local_rank = torch.distributed.get_rank()
-# local_rank表示本台机器上的进程序号,是由torch.distributed.launch自动分配和传入的。
-local_rank = args.local_rank
-# 根据local_rank来设定当前使用哪块GPU
-torch.cuda.set_device(local_rank)
-device = torch.device("cuda", local_rank)
-# 初始化DDP，使用默认backend(nccl)就行
-torch.distributed.init_process_group(backend="nccl")
+if args.distributed:
+    #  尝试分布式训练
+    # local_rank = torch.distributed.get_rank()
+    # local_rank表示本台机器上的进程序号,是由torch.distributed.launch自动分配和传入的。
+    local_rank = args.local_rank
+    # 根据local_rank来设定当前使用哪块GPU
+    torch.cuda.set_device(local_rank)
+    device = torch.device("cuda", local_rank)
+    # 初始化DDP，使用默认backend(nccl)就行
+    torch.distributed.init_process_group(backend="nccl")
+    print("args.local_rank={}".format(args.local_rank))
+else:
+    device = torch.device("cuda")
+
 # 尝试分布式训练
 local_master = True if not args.distributed else args.local_rank == 0
 
-print("args.local_rank={}".format(args.local_rank))
 # 打印所用的参数
 if local_master:
     logger.info('[Info] used parameters: {}'.format(vars(args)))
@@ -276,6 +280,7 @@ def main():
                 # set different random seed by passing epoch to sampler
                 if args.distributed:
                     train_loader.sampler.set_epoch(epoch)
+                    logger.info('train_loader.sampler.set_epoch({})'.format(epoch))
                 train_model.train(train_loader, local_master)
             if not args.no_validate:
                 train_model.validate(val_loader, local_master)  # 训练模式下：边训练边验证。

@@ -2,10 +2,11 @@
 export CUDA_VISIBLE_DEVICES=0
 
 # Train on Scene Flow training set。注意，nproc_per_node表示所用的GPU个数。
-python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py \
---mode train \
---distributed \
---accumulation_steps 4 \
+# val模式:表示训练并且每个epoch结束后都进行验证：train_loader使用“train”数据集，val_loader使用其中的“val”数据集。各数据集文件名见dataloader.py
+#python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py --distributed
+python train.py \
+--mode val \
+--accumulation_steps 1 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/aanet_sceneflow \
 --batch_size 6 \

@@ -31,7 +31,7 @@ class Model(object):
         args = self.args
         logger = self.logger
 
-        steps_per_epoch = len(train_loader) / args.accumulation_steps
+        steps_per_epoch = len(train_loader) / args.accumulation_steps # len(train_loader)返回的是Batch的个数
         device = self.device
 
         self.aanet.train()  # 设置模型为训练模式！
@@ -69,7 +69,7 @@ class Model(object):
             # 尝试分布式训练
             # 只在DDP模式下，轮数不是args.accumulation_steps整数倍的时候使用no_sync。
             # 博客：https://blog.csdn.net/a40850273/article/details/111829836
-            my_context = self.aanet.no_sync if args.local_rank != -1 and (i + 1) % args.accumulation_steps != 0 else nullcontext
+            my_context = self.aanet.no_sync if args.distributed and (i + 1) % args.accumulation_steps != 0 else nullcontext
             with my_context():
                 pred_disp_pyramid = self.aanet(left, right)  # list of H/12, H/6, H/3, H/2, H
 
@@ -138,6 +138,9 @@ class Model(object):
                     logger.info('Epoch: [%3d/%3d] [%5d/%5d] time: %4.2fs remainT: %4.2fh disp_loss: %.3f' %
                                 (self.epoch + 1, args.max_epoch, self.num_iter, steps_per_epoch, this_cycle,time_to_finish,
                                  disp_loss.item()))
+                    # self.num_iter：表示当前一共进行了多少次迭代，一次参数更新表示一次迭代。
+                    # steps_per_epoch：表示一个epoch中有多少次迭代，一次参数更新表示一次迭代。
+
 
                 if self.num_iter % args.summary_freq == 0:
                     img_summary = dict()
