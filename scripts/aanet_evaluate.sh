@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+export CUDA_VISIBLE_DEVICES=0
 ## Evaluate the best validation model on Scene Flow test set
 #CUDA_VISIBLE_DEVICES=1 python  -m torch.distributed.launch  --nproc_per_node 1 train.py \
 #--mode test \
@@ -17,9 +17,10 @@
 #--evaluate_only 2>&1 |tee logs/log_test2_aanet_train.txt
 
 # Evaluate the best validation model on Scene Flow test set：the Model is trained using DistributedDataParallel and convert_sync_batchnorm
-CUDA_VISIBLE_DEVICES=0 python  -m torch.distributed.launch --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py \
+
+# python  -m torch.distributed.launch --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py
+python train.py \
 --mode test \
---distributed \
 --accumulation_steps 1 \
 --checkpoint_dir checkpoints/aanet_sceneflow \
 --batch_size 6 \
