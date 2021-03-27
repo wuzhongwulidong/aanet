@@ -6,7 +6,7 @@ export CUDA_VISIBLE_DEVICES=0
 #python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py --distributed
 python train.py \
 --mode val \
---accumulation_steps 1 \
+--accumulation_steps 4 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/aanet_sceneflow \
 --batch_size 6 \
