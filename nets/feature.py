@@ -143,6 +143,7 @@ class PSMNetBasicBlock(nn.Module):
 
         out += x
 
+        # 注意：与标准的ResBlock相比，这里没有再对求out做Relu操作。
         return out
 
 

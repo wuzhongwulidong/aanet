@@ -29,7 +29,7 @@ class DeformConv2d(nn.Module):
                  bias=False):
         super(DeformConv2d, self).__init__()
 
-        self.modulation = modulation
+        self.modulation = modulation  # 是否使用调制参数Mk，论文公式4
         self.deformable_groups = deformable_groups
         self.kernel_size = kernel_size
         self.double_mask = double_mask

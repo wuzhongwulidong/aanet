@@ -272,7 +272,7 @@ def main():
 
     if args.evaluate_only:
         assert args.val_batch_size == 1
-        train_model.validate(val_loader, local_master)  # test模式。应该设置evaluate_only，且mode=“test”。
+        train_model.validate(val_loader, local_master)  # test模式。应该设置--evaluate_only，且--mode为“test”。
     else:
         for epoch in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
             if not args.evaluate_only:

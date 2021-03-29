@@ -141,7 +141,6 @@ class Model(object):
                     # self.num_iter：表示当前一共进行了多少次迭代，一次参数更新表示一次迭代。
                     # steps_per_epoch：表示一个epoch中有多少次迭代，一次参数更新表示一次迭代。
 
-
                 if self.num_iter % args.summary_freq == 0:
                     img_summary = dict()
                     img_summary['left'] = left    # [B, C=3, H, W]

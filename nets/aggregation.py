@@ -198,7 +198,7 @@ class PSMNetHGAggregation(nn.Module):
         super(PSMNetHGAggregation, self).__init__()
         self.max_disp = max_disp
 
-        self.dres0 = nn.Sequential(convbn_3d(64, 32, 3, 1, 1),
+        self.dres0 = nn.Sequential(convbn_3d(64, 32, 3, 1, 1),  # [in_planes, out_planes, kernel_size, stride, pad]
                                    nn.ReLU(inplace=True),
                                    convbn_3d(32, 32, 3, 1, 1),
                                    nn.ReLU(inplace=True))  # [B, 32, D/4, H/4, W/4]

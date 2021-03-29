@@ -20,7 +20,7 @@ class CostVolume(nn.Module):
         b, c, h, w = left_feature.size()
 
         if self.feature_similarity == 'difference':
-            cost_volume = left_feature.new_zeros(b, c, self.max_disp, h, w)  # [B, D ,H, W] D=192/3
+            cost_volume = left_feature.new_zeros(b, c, self.max_disp, h, w)  # [B, C, D, H, W] D=192/3
 
             for i in range(self.max_disp):
                 if i > 0:
