@@ -18,8 +18,10 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--mode', default='test', type=str,
+parser.add_argument('--mode', default='val', type=str,
                     help='Validation mode on small subset or test mode on full test data')
+# 0: debug; 1: overFit; 2: Train
+parser.add_argument('--debug_overFit_train', default=2, type=int, help='For code debug only!')
 
 # Training data
 parser.add_argument('--data_dir', default='data/SceneFlow', type=str, help='Training dataset')
@@ -144,6 +146,7 @@ def main():
     train_data = dataloader.StereoDataset(data_dir=args.data_dir,
                                           dataset_name=args.dataset_name,
                                           mode='train' if args.mode != 'train_all' else 'train_all',
+                                          debug_overFit_train= args.debug_overFit_train,
                                           load_pseudo_gt=args.load_pseudo_gt,
                                           transform=train_transform)
 
@@ -175,6 +178,7 @@ def main():
     val_data = dataloader.StereoDataset(data_dir=args.data_dir,
                                         dataset_name=args.dataset_name,
                                         mode=args.mode,
+                                        debug_overFit_train=args.debug_overFit_train,
                                         transform=val_transform)
 
     val_loader = DataLoader(dataset=val_data, batch_size=args.val_batch_size, shuffle=False,
