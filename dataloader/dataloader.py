@@ -23,7 +23,7 @@ class StereoDataset(Dataset):
         self.mode = mode
         self.save_filename = save_filename
         self.transform = transform
-
+        # TODO:
         sceneflow_finalpass_dict = {
             'train': 'filenames/SceneFlow_finalpass_train.txt',
             'val': 'filenames/SceneFlow_finalpass_val.txt',
