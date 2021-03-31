@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 from nets.feature import (StereoNetFeature, PSMNetFeature, GANetFeature, GCNetFeature,
                           FeaturePyrmaid, FeaturePyramidNetwork)
+from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAttention
 from nets.resnet import AANetFeature
 from nets.cost import CostVolume, CostVolumePyramid
 from nets.aggregation import (StereoNetAggregation, GCNetAggregation, PSMNetBasicAggregation,
@@ -20,6 +21,7 @@ class AANet(nn.Module):
                  feature_pyramid_network=False,
                  feature_similarity='correlation',
                  aggregation_type='adaptive',
+                 useFeatureAtt=1,
                  num_scales=3,
                  num_fusions=6,
                  deformable_groups=2,
@@ -56,6 +58,10 @@ class AANet(nn.Module):
             # 只有AANetFeature直接返回的是三个尺度的特征。
             self.feature_extractor = AANetFeature(feature_mdconv=(not no_feature_mdconv))
             self.max_disp = max_disp // 3
+        # elif feature_type == 'attention_aanet':
+        #     self.feature_extractor = myRawFeature()
+        #     self.max_disp = max_disp // 4
+        #     self.attentionBlocks = myAttentionBlock(in_channels=512, key_channels=256, value_channels=512)
         else:
             raise NotImplementedError
 
@@ -68,9 +74,13 @@ class AANet(nn.Module):
                 in_channels = [32, 64, 128]
             self.fpn = FeaturePyramidNetwork(in_channels=in_channels,
                                              out_channels=32 * 4)
+            featureAttentionInChl = [128, 128, 128]
         # 情形2：self.feature_extractor输出的是一个尺度的特征：需要生成三个尺度的特征。
         elif feature_pyramid:
             self.fpn = FeaturePyrmaid()
+            featureAttentionInChl = [32, 64, 128]
+
+        self.multiScaleAttention = multiScaleAttention(featureAttentionInChl) if useFeatureAtt else None
 
         # Cost volume construction
         # 情形1：多个尺度的特征
@@ -142,6 +152,15 @@ class AANet(nn.Module):
             feature = self.fpn(feature)
         return feature
 
+    def doAttention(self, left_feature, right_feature):
+        """
+        left_feature,right_feature都是三个尺度，尺度之间相差1/2：高分辨率->低分辨率
+        """
+        if self.multiScaleAttention is not None:
+            left_feature, right_feature = self.multiScaleAttention(left_feature, right_feature)
+
+        return left_feature, right_feature
+
     def cost_volume_construction(self, left_feature, right_feature):
         cost_volume = self.cost_volume(left_feature, right_feature)
 
@@ -211,6 +230,8 @@ class AANet(nn.Module):
     def forward(self, left_img, right_img):
         left_feature = self.feature_extraction(left_img)
         right_feature = self.feature_extraction(right_img)
+
+        left_feature, right_feature = self.doAttention(left_feature, right_feature)
 
         cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12
         aggregation = self.aggregation(cost_volume)

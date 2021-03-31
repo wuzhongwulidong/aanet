@@ -2,15 +2,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from torch.utils.data import Dataset
+import torch
+from torch.utils.data import Dataset, DataLoader
 import os
 
+from dataloader import transforms, dataloader
 from utils import utils
 from utils.file_io import read_img, read_disp
 
 
 class StereoDataset(Dataset):
     def __init__(self, data_dir,
+                 debug_overFit_train,
                  dataset_name='SceneFlow',
                  mode='train',
                  save_filename=False,
@@ -23,30 +26,34 @@ class StereoDataset(Dataset):
         self.mode = mode
         self.save_filename = save_filename
         self.transform = transform
-        # TODO:
+
+        # 0: debug; 1: overFit; 2: Train
+        tasks = {0: "filenames_debug", 1: "fileNames_overfit", 2: "filenames"}
+        nameFileDir = tasks[debug_overFit_train]
+
         sceneflow_finalpass_dict = {
-            'train': 'filenames/SceneFlow_finalpass_train.txt',
-            'val': 'filenames/SceneFlow_finalpass_val.txt',
-            'test': 'filenames/SceneFlow_finalpass_test.txt'
+            'train': '{}/SceneFlow_finalpass_train.txt'.format(nameFileDir),
+            'val': '{}/SceneFlow_finalpass_val.txt'.format(nameFileDir),
+            'test': '{}/SceneFlow_finalpass_test.txt'.format(nameFileDir)
         }
 
         kitti_2012_dict = {
-            'train': 'filenames/KITTI_2012_train.txt',
-            'train_all': 'filenames/KITTI_2012_train_all.txt',
-            'val': 'filenames/KITTI_2012_val.txt',
-            'test': 'filenames/KITTI_2012_test.txt'
+            'train': '{}/KITTI_2012_train.txt'.format(nameFileDir),
+            'train_all': '{}/KITTI_2012_train_all.txt'.format(nameFileDir),
+            'val': '{}/KITTI_2012_val.txt'.format(nameFileDir),
+            'test': '{}/KITTI_2012_test.txt'.format(nameFileDir)
         }
 
         kitti_2015_dict = {
-            'train': 'filenames/KITTI_2015_train.txt',
-            'train_all': 'filenames/KITTI_2015_train_all.txt',
-            'val': 'filenames/KITTI_2015_val.txt',
-            'test': 'filenames/KITTI_2015_test.txt'
+            'train': '{}/KITTI_2015_train.txt'.format(nameFileDir),
+            'train_all': '{}/KITTI_2015_train_all.txt'.format(nameFileDir),
+            'val': '{}/KITTI_2015_val.txt'.format(nameFileDir),
+            'test': '{}/KITTI_2015_test.txt'.format(nameFileDir)
         }
 
         kitti_mix_dict = {
-            'train': 'filenames/KITTI_mix.txt',
-            'test': 'filenames/KITTI_2015_test.txt'
+            'train': '{}/KITTI_mix.txt'.format(nameFileDir),
+            'test': '{}/KITTI_2015_test.txt'.format(nameFileDir)
         }
 
         dataset_name_dict = {
@@ -120,3 +127,127 @@ class StereoDataset(Dataset):
 
     def __len__(self):
         return len(self.samples)
+
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
+def getDataLoader(args, logger):
+    # Train loader
+    # # 0:debug;  1:overFit;  2:Train
+    if args.debug_overFit_train in [0, 2]:
+        train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
+                                transforms.RandomColor(),
+                                transforms.RandomVerticalFlip(),
+                                transforms.ToTensor(),  # 将图像数据转化为Tensor并除以255.0，将像素数值范围归一化到[0,1]之间且[H, W, C=3]->[C=3, H, W]
+                                transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]  # 使用ImageNet数据集的均值和方差再做归一化
+    elif args.debug_overFit_train == 1:
+        train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width, validate=True),  # 只做CenterCrop
+                                transforms.ToTensor(),
+                                transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]
+
+    train_transform = transforms.Compose(train_transform_list)
+
+    train_data = dataloader.StereoDataset(data_dir=args.data_dir,
+                                          debug_overFit_train=args.debug_overFit_train,
+                                          dataset_name=args.dataset_name,
+                                          mode='train' if args.mode != 'train_all' else 'train_all',
+                                          load_pseudo_gt=args.load_pseudo_gt,
+                                          transform=train_transform)
+
+    logger.info('=> {} training samples found in the training set'.format(len(train_data)))
+    #  尝试分布式训练
+    # 注意DistributedSampler默认参数就进行了shuffle
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data) if args.distributed else None
+
+    # train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
+    #                           num_workers=args.num_workers, pin_memory=True, drop_last=True,
+    #                           sampler=train_sampler)
+    #  尝试分布式训练
+    is_shuffle = False if args.distributed else True
+    # 需要注意的是，这里的batch_size指的是每个进程下的batch_size。也就是说，总batch_size是这里的batch_size再乘以并行数(world_size)。
+    train_loader = DataLoader(dataset=train_data,
+                              batch_size=args.batch_size,
+                              num_workers=args.num_workers,
+                              shuffle=is_shuffle,
+                              pin_memory=True,
+                              drop_last=True,
+                              sampler=train_sampler)
+
+    # Validation loader
+    val_transform_list = [transforms.RandomCrop(args.val_img_height, args.val_img_width, validate=True),
+                          transforms.ToTensor(),
+                          transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]
+
+    val_transform = transforms.Compose(val_transform_list)
+    val_data = dataloader.StereoDataset(data_dir=args.data_dir,
+                                        debug_overFit_train=args.debug_overFit_train,
+                                        dataset_name=args.dataset_name,
+                                        mode=args.mode,
+                                        transform=val_transform)
+    logger.info('=> {} val samples found in the val set'.format(len(val_data)))
+
+    val_loader = DataLoader(dataset=val_data, batch_size=args.val_batch_size, shuffle=False,
+                            num_workers=args.num_workers, pin_memory=True, drop_last=False)
+
+
+    # # Train loader
+    # # # 0: debug; 1: overFit; 2: Train
+    # if args.debug_overFit_train in [0, 2]:
+    #     train_transform_list = [myTransforms.RandomCrop(args.img_height, args.img_width),
+    #                             myTransforms.RandomColor(),
+    #                             myTransforms.RandomVerticalFlip(),
+    #                             myTransforms.ToTensor(),
+    #                             # 将图像数据转化为Tensor并除以255.0，将像素数值范围归一化到[0,1]之间且[H, W, C=3]->[C=3, H, W]
+    #                             myTransforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]  # 使用ImageNet数据集的均值和方差再做归一化
+    # elif args.debug_overFit_train == 1:
+    #     train_transform_list = [myTransforms.RandomCrop(args.img_height, args.img_width, validate=True),  # 只做CenterCrop
+    #                             myTransforms.ToTensor(),
+    #                             myTransforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]
+    #
+    # train_transform = myTransforms.Compose(train_transform_list)
+    #
+    # train_data = StereoDataset(data_dir=args.data_dir,
+    #                            debug_overFit_train=args.debug_overFit_train,
+    #                            dataset_name=args.dataset_name,
+    #                            mode='train' if args.mode != 'train_all' else 'train_all',
+    #                            load_pseudo_gt=args.load_pseudo_gt,
+    #                            transform=train_transform)
+    #
+    # logger.info('=> {} training samples found in the training set'.format(len(train_data)))
+    # #  尝试分布式训练
+    # # 注意DistributedSampler默认参数就进行了shuffle
+    # train_sampler = torch.utils.data.distributed.DistributedSampler(train_data) if args.distributed else None
+    #
+    # # train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
+    # #                           num_workers=args.num_workers, pin_memory=True, drop_last=True,
+    # #                           sampler=train_sampler)
+    # #  尝试分布式训练
+    # is_shuffle = False if args.distributed else True
+    # # 需要注意的是，这里的batch_size指的是每个进程下的batch_size。也就是说，总batch_size是这里的batch_size再乘以并行数(world_size)。
+    # train_loader = DataLoader(dataset=train_data,
+    #                           batch_size=args.batch_size,
+    #                           num_workers=args.num_workers,
+    #                           shuffle=is_shuffle,
+    #                           pin_memory=True,
+    #                           drop_last=True,
+    #                           sampler=train_sampler)
+    # # Validation loader
+    # val_transform_list = [myTransforms.RandomCrop(args.val_img_height, args.val_img_width, validate=True),
+    #                       myTransforms.ToTensor(),
+    #                       myTransforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]
+    #
+    # val_transform = myTransforms.Compose(val_transform_list)
+    # val_data = StereoDataset(data_dir=args.data_dir,
+    #                          debug_overFit_train=args.debug_overFit_train,
+    #                          dataset_name=args.dataset_name,
+    #                          mode='val',
+    #                          transform=val_transform)
+    # logger.info('=> {} val samples found in the val set'.format(len(val_data)))
+    # val_loader = DataLoader(dataset=val_data,
+    #                         batch_size=args.val_batch_size,
+    #                         shuffle=False,
+    #                         num_workers=args.num_workers,
+    #                         pin_memory=True,
+    #                         drop_last=False)
+
+    return train_loader, val_loader

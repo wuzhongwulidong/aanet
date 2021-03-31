@@ -25,7 +25,7 @@ class Model(object):
         self.best_epoch = -1 if best_epoch is None else best_epoch
 
         if not args.evaluate_only:
-            self.train_writer = SummaryWriter(self.args.checkpoint_dir)
+            self.train_writer = SummaryWriter(os.path.join(self.args.checkpoint_dir, "tensorBoardData"))
 
     def train(self, train_loader, local_master):
         args = self.args
@@ -47,8 +47,8 @@ class Model(object):
         # Learning rate summary
         base_lr = self.optimizer.param_groups[0]['lr']
         offset_lr = self.optimizer.param_groups[1]['lr']
-        self.train_writer.add_scalar('base_lr', base_lr, self.epoch + 1)
-        self.train_writer.add_scalar('offset_lr', offset_lr, self.epoch + 1)
+        self.train_writer.add_scalar('lr/base_lr', base_lr, self.epoch + 1)
+        self.train_writer.add_scalar('lr/offset_lr', offset_lr, self.epoch + 1)
 
         last_print_time = time.time()
 

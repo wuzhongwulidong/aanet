@@ -457,7 +457,7 @@ class AdaptiveAggregation(nn.Module):
             cost_volume = fusion(cost_volume)
 
         # Make sure the final output is in the first position
-        out = []  # 1/3, 1/6, 1/12
+        out = []  # H/3, H/6, H/12
         for i in range(len(self.final_conv)):
             out = out + [self.final_conv[i](cost_volume[i])]
 
