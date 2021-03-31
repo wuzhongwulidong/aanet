@@ -9,8 +9,8 @@ python train.py \
 --mode val \
 --debug_overFit_train 1 \
 --useFeatureAtt 1 \
---max_epoch 1000 \
---milestones 200,400,800,900,1000 \
+--max_epoch 64 \
+--milestones 20,30,40,50,60 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/attention_aanet+_train_sceneflow \
 --accumulation_steps 1 \
