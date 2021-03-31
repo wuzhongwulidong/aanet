@@ -7,7 +7,7 @@ export CUDA_VISIBLE_DEVICES=1
 ##python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py --distributed
 python train.py \
 --mode val \
---debug_overFit_train 1 \
+--debug_overFit_train 2 \
 --useFeatureAtt 1 \
 --max_epoch 64 \
 --milestones 20,30,40,50,60 \
