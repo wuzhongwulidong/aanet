@@ -98,7 +98,9 @@ parser.add_argument("--local_rank", type=int)  # 必须有这一句，但是loca
 parser.add_argument("--distributed", action='store_true', help="use DistributedDataParallel")
 
 args = parser.parse_args()
+utils.check_path(args.checkpoint_dir)
 logger = utils.get_logger(os.path.join(args.checkpoint_dir, "trainLog.txt"))
+
 # 调整打印频率
 if args.debug_overFit_train in [0, 2]:
     args.print_freq = 50
@@ -123,15 +125,13 @@ else:
 
 # 尝试分布式训练
 local_master = True if not args.distributed else args.local_rank == 0
+utils.save_args(args) if local_master else None
 
 # 打印所用的参数
 if local_master:
     logger.info('[Info] used parameters: {}'.format(vars(args)))
 
 torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
-
-utils.check_path(args.checkpoint_dir)
-utils.save_args(args) if local_master else None
 
 filename = 'command_test.txt' if args.mode == 'test' else 'command_train.txt'
 utils.save_command(args.checkpoint_dir, filename) if local_master else None
