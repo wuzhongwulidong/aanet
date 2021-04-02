@@ -71,7 +71,7 @@ class Model(object):
             # 博客：https://blog.csdn.net/a40850273/article/details/111829836
             my_context = self.aanet.no_sync if args.distributed and (i + 1) % args.accumulation_steps != 0 else nullcontext
             with my_context():
-                pred_disp_pyramid = self.aanet(left, right)  # list of H/12, H/6, H/3, H/2, H
+                pred_disp_pyramid = self.aanet(left, right)  # list H/12, H/6, H/3, H/2, H: 其中H/2, H分辨率的视差图是从H/3进行视差精确化得到的。
 
                 if args.highest_loss_only:
                     pred_disp_pyramid = [pred_disp_pyramid[-1]]  # only the last highest resolution output

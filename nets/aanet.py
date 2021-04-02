@@ -14,6 +14,7 @@ from nets.refinement import StereoNetRefinement, StereoDRNetRefinement, Hourglas
 
 class AANet(nn.Module):
     def __init__(self, max_disp,
+                 useFeatureAtt,
                  num_downsample=2,
                  feature_type='aanet',
                  no_feature_mdconv=False,
@@ -21,7 +22,6 @@ class AANet(nn.Module):
                  feature_pyramid_network=False,
                  feature_similarity='correlation',
                  aggregation_type='adaptive',
-                 useFeatureAtt=1,
                  num_scales=3,
                  num_fusions=6,
                  deformable_groups=2,
@@ -218,7 +218,7 @@ class AANet(nn.Module):
                         curr_right_img = F.interpolate(right_img,
                                                        scale_factor=scale_factor,
                                                        mode='bilinear', align_corners=False)
-                    inputs = (disparity, curr_left_img, curr_right_img)
+                    inputs = (disparity, curr_left_img, curr_right_img)  # H/3, H/2, H/2,或者 H/3, H, H
                     disparity = self.refinement[i](*inputs)
                     disparity_pyramid.append(disparity)  # [H/2, H]
 
@@ -231,12 +231,12 @@ class AANet(nn.Module):
         left_feature = self.feature_extraction(left_img)
         right_feature = self.feature_extraction(right_img)
 
-        left_feature, right_feature = self.doAttention(left_feature, right_feature)
+        left_feature, right_feature = self.doAttention(left_feature, right_feature)  # H/3, H/6, H/12
 
-        cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12
+        cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12. 可能是3D代价体或者4D代价体
         aggregation = self.aggregation(cost_volume)
 
-        disparity_pyramid = self.disparity_computation(aggregation)  # D/12, D/6, D/3
+        disparity_pyramid = self.disparity_computation(aggregation)  # H/12, H/6, H/3
         disparity_pyramid += self.disparity_refinement(left_img, right_img,
                                                        disparity_pyramid[-1])
-        return disparity_pyramid
+        return disparity_pyramid  # H/12, H/6, H/3, H/2, H: 其中H/2, H分辨率的视差图，是从H/3进行视差精确化得到的。
