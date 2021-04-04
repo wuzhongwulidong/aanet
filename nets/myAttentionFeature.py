@@ -298,7 +298,7 @@ class PAMAttentionBlock_(nn.Module):
 
         attCol_y2x = torch.matmul(Q, K) * (self.key_channels**-.5)  # [B, W, H, C] * [B, W, C, H] -> [B, W, H, H]
         attCol_y2x = F.softmax(attCol_y2x, dim=-1)
-        ctxtCol_x = torch.matmul(attCol_y2x, V).permute(0, 2, 1, 3).contiguous()  # [B, W, H, H] * [B, W, H, C] -> [B, W, H, C] -> [B, H, W, C]
+        ctxtCol_x = torch.matmul(attCol_y2x, V).permute(0, 3, 2, 1).contiguous()  # [B, W, H, H] * [B, W, H, C] -> [B, W, H, C] -> [B, C, H, W]
 
         # return context, sim_map
         return torch.cat([ctxtRow_x, ctxtCol_x], dim=1)
