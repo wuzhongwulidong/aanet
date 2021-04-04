@@ -306,6 +306,7 @@ class PAMAttentionBlock_(nn.Module):
 
 class myFuseBlock_(nn.Module):
     def __init__(self, in_channels, out_channels):
+        super(myFuseBlock_, self).__init__()
 
         self.fuse = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 1, 1, 1, bias=True),
