@@ -374,7 +374,7 @@ class multiScalePAMAttention(nn.Module):
         self.scale_num = scale_num
 
         if layer_names is None:
-            layer_names = ["self", "cross"] * 2
+            layer_names = ["self", "cross"]
 
         # self.feature_pyramid_network = feature_pyramid_network时：in_channels=[128, 128, 128]
         # self.feature_pyramid_network ！= feature_pyramid_network时：in_channels=[32, 64, 128]
