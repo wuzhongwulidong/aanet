@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 from nets.feature import (StereoNetFeature, PSMNetFeature, GANetFeature, GCNetFeature,
                           FeaturePyrmaid, FeaturePyramidNetwork)
-from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAttention
+from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAttention, multiScalePAMAttention
 from nets.resnet import AANetFeature
 from nets.cost import CostVolume, CostVolumePyramid
 from nets.aggregation import (StereoNetAggregation, GCNetAggregation, PSMNetBasicAggregation,
@@ -80,7 +80,8 @@ class AANet(nn.Module):
             self.fpn = FeaturePyrmaid()
             featureAttentionInChl = [32, 64, 128]
 
-        self.multiScaleAttention = multiScaleAttention(featureAttentionInChl) if useFeatureAtt else None
+        # self.multiScaleAttention = multiScaleAttention(featureAttentionInChl) if useFeatureAtt else None
+        self.multiScaleAttention = multiScalePAMAttention(featureAttentionInChl) if useFeatureAtt else None
 
         # Cost volume construction
         # 情形1：多个尺度的特征

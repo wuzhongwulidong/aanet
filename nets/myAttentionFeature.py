@@ -230,3 +230,153 @@ class multiScaleAttention(nn.Module):
             lft_feature[i], rht_feature[i] = self.attentionLayers[i](lft_feature[i], rht_feature[i])
 
         return lft_feature, rht_feature
+
+
+class PAMAttentionBlock_(nn.Module):
+    def __init__(self, in_channels, key_channels, value_channels):
+        super(PAMAttentionBlock_, self).__init__()
+        self.in_channels = in_channels
+        self.key_channels = key_channels
+        self.value_channels = value_channels
+
+        self.head = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, 3, 1, 1, bias=True),
+            nn.BatchNorm2d(in_channels),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(in_channels, in_channels, 3, 1, 1, bias=True),
+            nn.BatchNorm2d(in_channels),
+            nn.LeakyReLU(0.1, inplace=True))  # TODO: 这里可以考虑再增加一两层卷积
+
+        self.query = nn.Sequential(
+            nn.Conv2d(in_channels, key_channels, 1, 1, 0, bias=True),
+            nn.BatchNorm2d(key_channels))
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_channels, key_channels, 1, 1, 0, bias=True),
+            nn.BatchNorm2d(key_channels))
+
+        self.value = nn.Sequential(
+            nn.Conv2d(in_channels, value_channels, 1, 1, 0, bias=True),
+            nn.BatchNorm2d(value_channels))
+    #     self.parameter_initialization()
+    #
+    # def parameter_initialization(self):
+    #     for m in self.modules():
+    #         if isinstance(m, nn.Conv2d):
+    #             nn.init.kaiming_normal_(m.weight.data, nonlinearity='relu')
+    #             if m.bias is not None:
+    #                 nn.init.constant_(m.bias.data, 0)
+    #         elif isinstance(m, nn.BatchNorm2d):
+    #             m.weight.data.fill_(1)
+    #             m.bias.data.zero_()
+
+    def forward(self, x, y):
+        """
+        :param x:      features from the left image  (B * C * H * W)
+        :param y:     features from the right image (B * C * H * W)
+        """
+        assert x.size() == y.size()
+        b, c, h, w = x.shape
+
+        fea_x = self.head(x)
+        fea_y = self.head(y)
+
+        # 行内Attention
+        Q = self.query(fea_x).permute(0, 2, 3, 1).contiguous()       # B * H * W * C
+        K = self.key(fea_y).permute(0, 2, 1, 3) .contiguous()        # B * H * C * W
+        V = self.value(fea_y).permute(0, 2, 3, 1).contiguous()       # B * H * W * C
+
+        attRow_y2x = torch.matmul(Q, K) * (self.key_channels**-.5)  # M(B->A): B * H * W * W     # scale the matching cost
+        # attCol_y2x = attCol_y2x + cost[0]
+        attRow_y2x = F.softmax(attRow_y2x, dim=-1)
+        ctxtRow_x = torch.matmul(attRow_y2x, V).permute(0, 3, 1, 2).contiguous()  # [B, H, W, W] * [B, H, W, C] = [B, H, W, C] -> [B, C, H, W]
+
+        # 列内Attention
+        Q = Q.permute(0, 2, 1, 3).contiguous()       # B * H * W * C -> B * W * H * C
+        K = K.permute(0, 3, 2, 1).contiguous()        # B * H * C * W -> B * W * C * H
+        V = V.permute(0, 2, 1, 3).contiguous()       # B * H * W * C -> B * W * H * C
+
+        attCol_y2x = torch.matmul(Q, K) * (self.key_channels**-.5)  # [B, W, H, C] * [B, W, C, H] -> [B, W, H, H]
+        attCol_y2x = F.softmax(attCol_y2x, dim=-1)
+        ctxtCol_x = torch.matmul(attCol_y2x, V).permute(0, 2, 1, 3).contiguous()  # [B, W, H, H] * [B, W, H, C] -> [B, W, H, C] -> [B, H, W, C]
+
+        # return context, sim_map
+        return torch.cat([ctxtRow_x, ctxtCol_x], dim=1)
+
+
+class myFuseBlock_(nn.Module):
+    def __init__(self, in_channels, out_channels):
+
+        self.fuse = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 1, 1, 1, bias=True),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=True),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(0.1, inplace=True))
+
+    def forward(self, x):
+        return self.fuse(x)
+
+
+class myPAMAttentionBlock(nn.Module):
+    def __init__(self, in_channels, key_channels, value_channels, layer_names=None):
+        super(myPAMAttentionBlock, self).__init__()
+        assert layer_names is not None
+
+        self.names = layer_names
+
+        self.layers = nn.ModuleList([PAMAttentionBlock_(in_channels, key_channels, value_channels)
+                                     for _ in range(len(layer_names))])
+
+        self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels * 3, value_channels)
+                                    for _ in range(len(layer_names))])
+        self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels * 3, value_channels)
+                                    for _ in range(len(layer_names))])
+
+    def forward(self, x, y):
+        for layer, name, x_fuse, y_fuse in zip(self.layers, self.names, self.fuse_x, self.fuse_y):
+            if name == 'cross':
+                ctxt_x, ctxt_y = layer(x, y), layer(y, x)
+            elif name == 'self':
+                ctxt_x, ctxt_y = layer(x, x), layer(y, y)
+            else:
+                raise Exception("Error, Please specify: cross OR self Attention!")
+
+            x, y = x_fuse(torch.cat([x, ctxt_x], dim=1)), y_fuse(torch.cat([y, ctxt_y], dim=1))
+
+        return x, y
+
+
+class multiScalePAMAttention(nn.Module):
+    def __init__(self, in_channels, scale_num=3, layer_names=None):
+        super(multiScalePAMAttention, self).__init__()
+
+        self.scale_num = scale_num
+
+        if layer_names is None:
+            layer_names = ["self", "cross"] * 3
+
+        # self.feature_pyramid_network = feature_pyramid_network时：in_channels=[128, 128, 128]
+        # self.feature_pyramid_network ！= feature_pyramid_network时：in_channels=[32, 64, 128]
+        lists = nn.ModuleList()
+        lists.append(
+            myPAMAttentionBlock(in_channels=in_channels[0], key_channels=16, value_channels=in_channels[0],
+                             layer_names=layer_names))
+        lists.append(
+            myPAMAttentionBlock(in_channels=in_channels[1], key_channels=32, value_channels=in_channels[1],
+                             layer_names=layer_names))
+        lists.append(
+            myPAMAttentionBlock(in_channels=in_channels[2], key_channels=64, value_channels=in_channels[2],
+                             layer_names=layer_names))
+
+        self.pamAttentionLayers = lists
+
+    def forward(self, lft_feature, rht_feature):
+        assert len(lft_feature) == len(rht_feature) == 3  # 高分辨率->低分辨率
+
+        # for i in [0, 1, 2]:
+        for i in range(self.scale_num):
+            lft_feature[i], rht_feature[i] = self.pamAttentionLayers[i](lft_feature[i], rht_feature[i])
+
+        return lft_feature, rht_feature
