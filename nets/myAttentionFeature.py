@@ -233,30 +233,34 @@ class multiScaleAttention(nn.Module):
 
 
 class PAMAttentionBlock_(nn.Module):
-    def __init__(self, in_channels, key_channels, value_channels):
+    def __init__(self, in_channels, channel_shrink, key_channels, value_channels):
         super(PAMAttentionBlock_, self).__init__()
         self.in_channels = in_channels
         self.key_channels = key_channels
         self.value_channels = value_channels
 
+        srnk_cnls = in_channels // channel_shrink
         self.head = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, 3, 1, 1, bias=True),
-            nn.BatchNorm2d(in_channels),
+            nn.Conv2d(in_channels, srnk_cnls, 1, 1, 0, bias=True),
+            nn.BatchNorm2d(srnk_cnls),
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(in_channels, in_channels, 3, 1, 1, bias=True),
-            nn.BatchNorm2d(in_channels),
+            nn.Conv2d(srnk_cnls, srnk_cnls, 3, 1, 1, bias=True),
+            nn.BatchNorm2d(srnk_cnls),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(srnk_cnls, srnk_cnls, 3, 1, 1, bias=True),
+            nn.BatchNorm2d(srnk_cnls),
             nn.LeakyReLU(0.1, inplace=True))  # TODO: 这里可以考虑再增加一两层卷积
 
         self.query = nn.Sequential(
-            nn.Conv2d(in_channels, key_channels, 1, 1, 0, bias=True),
+            nn.Conv2d(srnk_cnls, key_channels, 1, 1, 0, bias=True),
             nn.BatchNorm2d(key_channels))
 
         self.key = nn.Sequential(
-            nn.Conv2d(in_channels, key_channels, 1, 1, 0, bias=True),
+            nn.Conv2d(srnk_cnls, key_channels, 1, 1, 0, bias=True),
             nn.BatchNorm2d(key_channels))
 
         self.value = nn.Sequential(
-            nn.Conv2d(in_channels, value_channels, 1, 1, 0, bias=True),
+            nn.Conv2d(srnk_cnls, value_channels, 1, 1, 0, bias=True),
             nn.BatchNorm2d(value_channels))
     #     self.parameter_initialization()
     #
@@ -301,7 +305,8 @@ class PAMAttentionBlock_(nn.Module):
         ctxtCol_x = torch.matmul(attCol_y2x, V).permute(0, 3, 2, 1).contiguous()  # [B, W, H, H] * [B, W, H, C] -> [B, W, H, C] -> [B, C, H, W]
 
         # return context, sim_map
-        return torch.cat([ctxtRow_x, ctxtCol_x], dim=1)
+        # return torch.cat([ctxtRow_x, ctxtCol_x], dim=1)
+        return ctxtRow_x + ctxtCol_x
 
 
 class myFuseBlock_(nn.Module):
@@ -309,10 +314,10 @@ class myFuseBlock_(nn.Module):
         super(myFuseBlock_, self).__init__()
 
         self.fuse = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 1, 1, 1, bias=True),
+            nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True),
             nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=True),
+            nn.Conv2d(out_channels, out_channels, 1, 1, 1, bias=True),
             nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(0.1, inplace=True))
 
@@ -321,22 +326,22 @@ class myFuseBlock_(nn.Module):
 
 
 class myPAMAttentionBlock(nn.Module):
-    def __init__(self, in_channels, key_channels, value_channels, layer_names=None):
+    def __init__(self, in_channels, channel_shrink, key_channels, value_channels, layer_names=None):
         super(myPAMAttentionBlock, self).__init__()
         assert layer_names is not None
 
         self.names = layer_names
 
-        self.layers = nn.ModuleList([PAMAttentionBlock_(in_channels, key_channels, value_channels)
+        self.layers = nn.ModuleList([PAMAttentionBlock_(in_channels, channel_shrink, key_channels, value_channels)
                                      for _ in range(len(layer_names))])
 
-        self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels * 3, value_channels)
-                                    for _ in range(len(layer_names))])
-        self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels * 3, value_channels)
-                                    for _ in range(len(layer_names))])
+        # self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+        #                             for _ in range(len(layer_names))])
+        # self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+        #                             for _ in range(len(layer_names))])
 
     def forward(self, x, y):
-        for layer, name, x_fuse, y_fuse in zip(self.layers, self.names, self.fuse_x, self.fuse_y):
+        for layer, name in zip(self.layers, self.names):
             if name == 'cross':
                 ctxt_x, ctxt_y = layer(x, y), layer(y, x)
             elif name == 'self':
@@ -344,31 +349,45 @@ class myPAMAttentionBlock(nn.Module):
             else:
                 raise Exception("Error, Please specify: cross OR self Attention!")
 
-            x, y = x_fuse(torch.cat([x, ctxt_x], dim=1)), y_fuse(torch.cat([y, ctxt_y], dim=1))
+            x, y = x + ctxt_x, y + ctxt_y
 
         return x, y
 
+    # def forward(self, x, y):
+    #     for layer, name, x_fuse, y_fuse in zip(self.layers, self.names, self.fuse_x, self.fuse_y):
+    #         if name == 'cross':
+    #             ctxt_x, ctxt_y = layer(x, y), layer(y, x)
+    #         elif name == 'self':
+    #             ctxt_x, ctxt_y = layer(x, x), layer(y, y)
+    #         else:
+    #             raise Exception("Error, Please specify: cross OR self Attention!")
+    #
+    #         x, y = x_fuse(torch.cat([x, ctxt_x], dim=1)), y_fuse(torch.cat([y, ctxt_y], dim=1))
+    #
+    #     return x, y
+
 
 class multiScalePAMAttention(nn.Module):
-    def __init__(self, in_channels, scale_num=3, layer_names=None):
+    def __init__(self, in_channels, feature_pyramid_network, scale_num=3, layer_names=None):
         super(multiScalePAMAttention, self).__init__()
 
         self.scale_num = scale_num
 
         if layer_names is None:
-            layer_names = ["self", "cross"]
+            layer_names = ["self", "cross"] * 2
 
         # self.feature_pyramid_network = feature_pyramid_network时：in_channels=[128, 128, 128]
         # self.feature_pyramid_network ！= feature_pyramid_network时：in_channels=[32, 64, 128]
+        cnl_s = [4, 2, 1] if feature_pyramid_network else [1, 1, 1]  # 用于压缩通道数
         lists = nn.ModuleList()
         lists.append(
-            myPAMAttentionBlock(in_channels=in_channels[0], key_channels=16, value_channels=in_channels[0],
+            myPAMAttentionBlock(in_channels=in_channels[0], channel_shrink=cnl_s[0], key_channels=16, value_channels=in_channels[0],
                              layer_names=layer_names))
         lists.append(
-            myPAMAttentionBlock(in_channels=in_channels[1], key_channels=32, value_channels=in_channels[1],
+            myPAMAttentionBlock(in_channels=in_channels[1], channel_shrink=cnl_s[1], key_channels=32, value_channels=in_channels[1],
                              layer_names=layer_names))
         lists.append(
-            myPAMAttentionBlock(in_channels=in_channels[2], key_channels=64, value_channels=in_channels[2],
+            myPAMAttentionBlock(in_channels=in_channels[2], channel_shrink=cnl_s[2], key_channels=64, value_channels=in_channels[2],
                              layer_names=layer_names))
 
         self.pamAttentionLayers = lists

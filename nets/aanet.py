@@ -81,7 +81,7 @@ class AANet(nn.Module):
             featureAttentionInChl = [32, 64, 128]
 
         # self.multiScaleAttention = multiScaleAttention(featureAttentionInChl) if useFeatureAtt else None
-        self.multiScaleAttention = multiScalePAMAttention(featureAttentionInChl) if useFeatureAtt else None
+        self.multiScaleAttention = multiScalePAMAttention(featureAttentionInChl, feature_pyramid_network) if useFeatureAtt else None
 
         # Cost volume construction
         # 情形1：多个尺度的特征
