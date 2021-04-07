@@ -198,7 +198,7 @@ class PSMNetHGAggregation(nn.Module):
         super(PSMNetHGAggregation, self).__init__()
         self.max_disp = max_disp
 
-        self.dres0 = nn.Sequential(convbn_3d(64, 32, 3, 1, 1),
+        self.dres0 = nn.Sequential(convbn_3d(64, 32, 3, 1, 1),  # [in_planes, out_planes, kernel_size, stride, pad]
                                    nn.ReLU(inplace=True),
                                    convbn_3d(32, 32, 3, 1, 1),
                                    nn.ReLU(inplace=True))  # [B, 32, D/4, H/4, W/4]
@@ -457,7 +457,7 @@ class AdaptiveAggregation(nn.Module):
             cost_volume = fusion(cost_volume)
 
         # Make sure the final output is in the first position
-        out = []  # 1/3, 1/6, 1/12
+        out = []  # H/3, H/6, H/12
         for i in range(len(self.final_conv)):
             out = out + [self.final_conv[i](cost_volume[i])]
 

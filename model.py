@@ -3,6 +3,7 @@ import time
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 import os
+from contextlib import nullcontext
 
 from utils import utils
 from utils.visualization import disp_error_img, save_images
@@ -24,13 +25,13 @@ class Model(object):
         self.best_epoch = -1 if best_epoch is None else best_epoch
 
         if not args.evaluate_only:
-            self.train_writer = SummaryWriter(self.args.checkpoint_dir)
+            self.train_writer = SummaryWriter(os.path.join(self.args.checkpoint_dir, "tensorBoardData"))
 
-    def train(self, train_loader):
+    def train(self, train_loader, local_master):
         args = self.args
         logger = self.logger
 
-        steps_per_epoch = len(train_loader)
+        steps_per_epoch = len(train_loader) / args.accumulation_steps # len(train_loader)返回的是Batch的个数
         device = self.device
 
         self.aanet.train()  # 设置模型为训练模式！
@@ -46,8 +47,8 @@ class Model(object):
         # Learning rate summary
         base_lr = self.optimizer.param_groups[0]['lr']
         offset_lr = self.optimizer.param_groups[1]['lr']
-        self.train_writer.add_scalar('base_lr', base_lr, self.epoch + 1)
-        self.train_writer.add_scalar('offset_lr', offset_lr, self.epoch + 1)
+        self.train_writer.add_scalar('lr/base_lr', base_lr, self.epoch + 1)
+        self.train_writer.add_scalar('lr/offset_lr', offset_lr, self.epoch + 1)
 
         last_print_time = time.time()
 
@@ -65,115 +66,128 @@ class Model(object):
             if not mask.any():  # np.array.any()是或操作，任意一个元素为True，输出为True。
                 continue
 
-            pred_disp_pyramid = self.aanet(left, right)  # list of H/12, H/6, H/3, H/2, H
+            # 尝试分布式训练
+            # 只在DDP模式下，轮数不是args.accumulation_steps整数倍的时候使用no_sync。
+            # 博客：https://blog.csdn.net/a40850273/article/details/111829836
+            my_context = self.aanet.no_sync if args.distributed and (i + 1) % args.accumulation_steps != 0 else nullcontext
+            with my_context():
+                pred_disp_pyramid = self.aanet(left, right)  # list H/12, H/6, H/3, H/2, H: 其中H/2, H分辨率的视差图是从H/3进行视差精确化得到的。
 
-            if args.highest_loss_only:
-                pred_disp_pyramid = [pred_disp_pyramid[-1]]  # only the last highest resolution output
+                if args.highest_loss_only:
+                    pred_disp_pyramid = [pred_disp_pyramid[-1]]  # only the last highest resolution output
 
-            disp_loss = 0
-            pseudo_disp_loss = 0
-            pyramid_loss = []
-            pseudo_pyramid_loss = []
+                disp_loss = 0
+                pseudo_disp_loss = 0
+                pyramid_loss = []
+                pseudo_pyramid_loss = []
 
-            # Loss weights
-            if len(pred_disp_pyramid) == 5:
-                pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0, 1.0]  # AANet and AANet+
-            elif len(pred_disp_pyramid) == 4:
-                pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0]
-            elif len(pred_disp_pyramid) == 3:
-                pyramid_weight = [1.0, 1.0, 1.0]  # 1 scale only
-            elif len(pred_disp_pyramid) == 1:
-                pyramid_weight = [1.0]  # highest loss only
-            else:
-                raise NotImplementedError
+                # Loss weights
+                if len(pred_disp_pyramid) == 5:
+                    pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0, 1.0]  # AANet and AANet+
+                elif len(pred_disp_pyramid) == 4:
+                    pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0]
+                elif len(pred_disp_pyramid) == 3:
+                    pyramid_weight = [1.0, 1.0, 1.0]  # 1 scale only
+                elif len(pred_disp_pyramid) == 1:
+                    pyramid_weight = [1.0]  # highest loss only
+                else:
+                    raise NotImplementedError
 
-            assert len(pyramid_weight) == len(pred_disp_pyramid)
-            for k in range(len(pred_disp_pyramid)):
-                pred_disp = pred_disp_pyramid[k]
-                weight = pyramid_weight[k]
+                assert len(pyramid_weight) == len(pred_disp_pyramid)
+                for k in range(len(pred_disp_pyramid)):
+                    pred_disp = pred_disp_pyramid[k]
+                    weight = pyramid_weight[k]
 
-                if pred_disp.size(-1) != gt_disp.size(-1):
-                    pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
-                    pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
-                                              mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))  # 最后乘上这一项是必须的。因为图像放大，视差要相应增大。
-                    pred_disp = pred_disp.squeeze(1)  # [B, H, W]
+                    if pred_disp.size(-1) != gt_disp.size(-1):
+                        pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
+                        pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
+                                                  mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))  # 最后乘上这一项是必须的。因为图像放大，视差要相应增大。
+                        pred_disp = pred_disp.squeeze(1)  # [B, H, W]
 
-                curr_loss = F.smooth_l1_loss(pred_disp[mask], gt_disp[mask],
-                                             reduction='mean')
-                disp_loss += weight * curr_loss
-                pyramid_loss.append(curr_loss)
+                    curr_loss = F.smooth_l1_loss(pred_disp[mask], gt_disp[mask],
+                                                 reduction='mean')
+                    disp_loss += weight * curr_loss
+                    pyramid_loss.append(curr_loss)
 
-                # Pseudo gt loss
-                if args.load_pseudo_gt:
-                    pseudo_curr_loss = F.smooth_l1_loss(pred_disp[pseudo_mask], pseudo_gt_disp[pseudo_mask],
-                                                        reduction='mean')
-                    pseudo_disp_loss += weight * pseudo_curr_loss
+                    # Pseudo gt loss
+                    if args.load_pseudo_gt:
+                        pseudo_curr_loss = F.smooth_l1_loss(pred_disp[pseudo_mask], pseudo_gt_disp[pseudo_mask],
+                                                            reduction='mean')
+                        pseudo_disp_loss += weight * pseudo_curr_loss
 
-                    pseudo_pyramid_loss.append(pseudo_curr_loss)
+                        pseudo_pyramid_loss.append(pseudo_curr_loss)
 
-            total_loss = disp_loss + pseudo_disp_loss
+                total_loss = disp_loss + pseudo_disp_loss
 
-            self.optimizer.zero_grad()
-            total_loss.backward()
-            self.optimizer.step()
+                total_loss /= args.accumulation_steps
+                total_loss.backward()
 
-            self.num_iter += 1
+            if (i + 1) % args.accumulation_steps == 0:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
-            if self.num_iter % args.print_freq == 0:
-                this_cycle = time.time() - last_print_time
-                last_print_time += this_cycle
+                self.num_iter += 1
 
-                logger.info('Epoch: [%3d/%3d] [%5d/%5d] time: %4.2fs disp_loss: %.3f' %
-                            (self.epoch + 1, args.max_epoch, i + 1, steps_per_epoch, this_cycle,
-                             disp_loss.item()))
+                if self.num_iter % args.print_freq == 0:
+                    this_cycle = time.time() - last_print_time
+                    last_print_time += this_cycle
 
-            if self.num_iter % args.summary_freq == 0:
-                img_summary = dict()
-                img_summary['left'] = left    # [B, C=3, H, W]
-                img_summary['right'] = right  # [B, C=3, H, W]
-                img_summary['gt_disp'] = gt_disp  # [B, H, W]
+                    time_to_finish = (args.max_epoch - self.epoch) * (1.0 * steps_per_epoch / args.print_freq) * \
+                                     this_cycle / 3600.0  # 还有多久才能完成训练。单位：小时
 
-                if args.load_pseudo_gt:
-                    img_summary['pseudo_gt_disp'] = pseudo_gt_disp
+                    logger.info('Epoch: [%3d/%3d] [%5d/%5d] time: %4.2fs remainT: %4.2fh disp_loss: %.3f' %
+                                (self.epoch + 1, args.max_epoch, self.num_iter, steps_per_epoch, this_cycle,time_to_finish,
+                                 disp_loss.item()))
+                    # self.num_iter：表示当前一共进行了多少次迭代，一次参数更新表示一次迭代。
+                    # steps_per_epoch：表示一个epoch中有多少次迭代，一次参数更新表示一次迭代。
 
-                # Save pyramid disparity prediction
-                for s in range(len(pred_disp_pyramid)):
-                    # Scale from low to high, reverse
-                    save_name = 'pred_disp' + str(len(pred_disp_pyramid) - s - 1)  # pred_disp0-->pred_disp4：高分辨率->低分辨率
-                    save_value = pred_disp_pyramid[s]
-                    img_summary[save_name] = save_value
+                if self.num_iter % args.summary_freq == 0:
+                    img_summary = dict()
+                    img_summary['left'] = left    # [B, C=3, H, W]
+                    img_summary['right'] = right  # [B, C=3, H, W]
+                    img_summary['gt_disp'] = gt_disp  # [B, H, W]
 
-                pred_disp = pred_disp_pyramid[-1]
+                    if args.load_pseudo_gt:
+                        img_summary['pseudo_gt_disp'] = pseudo_gt_disp
 
-                if pred_disp.size(-1) != gt_disp.size(-1):
-                    pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
-                    pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
-                                              mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))
-                    pred_disp = pred_disp.squeeze(1)  # [B, H, W]
-                img_summary['disp_error'] = disp_error_img(pred_disp, gt_disp)  # [B, C=3, H, W]
+                    # Save pyramid disparity prediction
+                    for s in range(len(pred_disp_pyramid)):
+                        # Scale from low to high, reverse
+                        save_name = 'pred_disp' + str(len(pred_disp_pyramid) - s - 1)  # pred_disp0-->pred_disp4：高分辨率->低分辨率
+                        save_value = pred_disp_pyramid[s]
+                        img_summary[save_name] = save_value
 
-                save_images(self.train_writer, 'train', img_summary, self.num_iter)
+                    pred_disp = pred_disp_pyramid[-1]
 
-                epe = F.l1_loss(gt_disp[mask], pred_disp[mask], reduction='mean')
+                    if pred_disp.size(-1) != gt_disp.size(-1):
+                        pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
+                        pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
+                                                  mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))
+                        pred_disp = pred_disp.squeeze(1)  # [B, H, W]
+                    img_summary['disp_error'] = disp_error_img(pred_disp, gt_disp)  # [B, C=3, H, W]
 
-                self.train_writer.add_scalar('train/epe', epe.item(), self.num_iter)
-                self.train_writer.add_scalar('train/disp_loss', disp_loss.item(), self.num_iter)
-                self.train_writer.add_scalar('train/total_loss', total_loss.item(), self.num_iter)
+                    save_images(self.train_writer, 'train', img_summary, self.num_iter)
 
-                # Save loss of different scale
-                for s in range(len(pyramid_loss)):
-                    save_name = 'train/loss' + str(len(pyramid_loss) - s - 1)  # loss0-->loss4：低分辨率~高分辨率
-                    save_value = pyramid_loss[s]
-                    self.train_writer.add_scalar(save_name, save_value, self.num_iter)
+                    epe = F.l1_loss(gt_disp[mask], pred_disp[mask], reduction='mean')
 
-                d1 = d1_metric(pred_disp, gt_disp, mask)   # pred_disp.shape=[B, H, W], gt_disp.shape=[B, H, W]
-                self.train_writer.add_scalar('train/d1', d1.item(), self.num_iter)
-                thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)  # mask.shape=[B, H, W]
-                thres2 = thres_metric(pred_disp, gt_disp, mask, 2.0)
-                thres3 = thres_metric(pred_disp, gt_disp, mask, 3.0)
-                self.train_writer.add_scalar('train/thres1', thres1.item(), self.num_iter)
-                self.train_writer.add_scalar('train/thres2', thres2.item(), self.num_iter)
-                self.train_writer.add_scalar('train/thres3', thres3.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/epe', epe.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/disp_loss', disp_loss.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/total_loss', total_loss.item(), self.num_iter)
+
+                    # Save loss of different scale
+                    for s in range(len(pyramid_loss)):
+                        save_name = 'train/loss' + str(len(pyramid_loss) - s - 1)  # loss0-->loss4：低分辨率~高分辨率
+                        save_value = pyramid_loss[s]
+                        self.train_writer.add_scalar(save_name, save_value, self.num_iter)
+
+                    d1 = d1_metric(pred_disp, gt_disp, mask)   # pred_disp.shape=[B, H, W], gt_disp.shape=[B, H, W]
+                    self.train_writer.add_scalar('train/d1', d1.item(), self.num_iter)
+                    thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)  # mask.shape=[B, H, W]
+                    thres2 = thres_metric(pred_disp, gt_disp, mask, 2.0)
+                    thres3 = thres_metric(pred_disp, gt_disp, mask, 3.0)
+                    self.train_writer.add_scalar('train/thres1', thres1.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/thres2', thres2.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/thres3', thres3.item(), self.num_iter)
 
         self.epoch += 1
 
@@ -189,7 +203,7 @@ class Model(object):
                                   epoch=self.epoch, num_iter=self.num_iter,
                                   epe=-1, best_epe=self.best_epe,
                                   best_epoch=self.best_epoch,
-                                  filename='aanet_latest.pth')
+                                  filename='aanet_latest.pth') if local_master else None
 
             # Save checkpoint of specific epoch
             if self.epoch % args.save_ckpt_freq == 0:
@@ -199,9 +213,9 @@ class Model(object):
                                       epoch=self.epoch, num_iter=self.num_iter,
                                       epe=-1, best_epe=self.best_epe,
                                       best_epoch=self.best_epoch,
-                                      save_optimizer=False)
+                                      save_optimizer=False) if local_master else None
 
-    def validate(self, val_loader):
+    def validate(self, val_loader, local_master):
         args = self.args
         logger = self.logger
         logger.info('=> Start validation...')
@@ -236,8 +250,9 @@ class Model(object):
         num_imgs = 0
         valid_samples = 0
 
+        # 遍历验证样本或测试样本
         for i, sample in enumerate(val_loader):
-            if i % 100 == 0:
+            if (i+1) % 100 == 0:
                 logger.info('=> Validating %d/%d' % (i, num_samples))
 
             left = sample['left'].to(self.device)  # [B, 3, H, W]
@@ -284,6 +299,7 @@ class Model(object):
                     img_summary['pred_disp'] = pred_disp
                     save_images(self.train_writer, 'val' + str(val_count), img_summary, self.epoch)
                     val_count += 1
+        # 遍历验证样本或测试样本完成
 
         logger.info('=> Validation done!')
 
@@ -301,6 +317,7 @@ class Model(object):
             f.write('thres1: %.4f\t' % mean_thres1)
             f.write('thres2: %.4f\t' % mean_thres2)
             f.write('thres3: %.4f\n' % mean_thres3)
+            f.write('dataset_name= %s\t mode=%s\n' % (args.dataset_name, args.mode))
 
         logger.info('=> Mean validation epe of epoch %d: %.3f' % (self.epoch, mean_epe))
 
@@ -322,7 +339,7 @@ class Model(object):
                                           epoch=self.epoch, num_iter=self.num_iter,
                                           epe=mean_d1, best_epe=self.best_epe,
                                           best_epoch=self.best_epoch,
-                                          filename='aanet_best.pth')
+                                          filename='aanet_best.pth') if local_master else None
             elif args.val_metric == 'epe':
                 if mean_epe < self.best_epe:
                     self.best_epe = mean_epe
@@ -332,7 +349,7 @@ class Model(object):
                                           epoch=self.epoch, num_iter=self.num_iter,
                                           epe=mean_epe, best_epe=self.best_epe,
                                           best_epoch=self.best_epoch,
-                                          filename='aanet_best.pth')
+                                          filename='aanet_best.pth') if local_master else None
             else:
                 raise NotImplementedError
 
@@ -353,7 +370,7 @@ class Model(object):
                                   epoch=self.epoch, num_iter=self.num_iter,
                                   epe=mean_epe, best_epe=self.best_epe,
                                   best_epoch=self.best_epoch,
-                                  filename='aanet_latest.pth')
+                                  filename='aanet_latest.pth') if local_master else None
 
             # Save checkpoint of specific epochs
             if self.epoch % args.save_ckpt_freq == 0:
@@ -363,4 +380,4 @@ class Model(object):
                                       epoch=self.epoch, num_iter=self.num_iter,
                                       epe=mean_epe, best_epe=self.best_epe,
                                       best_epoch=self.best_epoch,
-                                      save_optimizer=False)
+                                      save_optimizer=False) if local_master else None

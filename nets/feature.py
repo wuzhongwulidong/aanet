@@ -106,9 +106,9 @@ class StereoNetFeature(nn.Module):
         self.final_conv = conv3x3(out_channels, out_channels)
 
     def forward(self, img):
-        out = self.downsample(img)  # [B, 32, H/8, W/8]
-        out = self.residual_blocks(out)  # [B, 32, H/8, W/8]
-        out = self.final_conv(out)  # [B, 32, H/8, W/8]
+        out = self.downsample(img)  # [B, 32, H/4, W/4]
+        out = self.residual_blocks(out)  # [B, 32, H/4, W/4]
+        out = self.final_conv(out)  # [B, 32, H/4, W/4]
 
         return out
 
@@ -143,6 +143,7 @@ class PSMNetBasicBlock(nn.Module):
 
         out += x
 
+        # 注意：与标准的ResBlock相比，这里没有再对求out做Relu操作。
         return out
 
 

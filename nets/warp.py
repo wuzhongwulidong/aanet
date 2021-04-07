@@ -46,7 +46,7 @@ def disp_warp(img, disp, padding_mode='border'):
         padding_mode: 'zeros' or 'border'
     Returns:
         warped_img: [B, 3, H, W]
-        valid_mask: [B, 3, H, W]
+        valid_mask: [B, 3, H, W]ffind
     """
     assert disp.min() >= 0
 
@@ -55,10 +55,12 @@ def disp_warp(img, disp, padding_mode='border'):
     offset = torch.cat((-disp, torch.zeros_like(disp)), dim=1)  # [B, 2, H, W]
     sample_grid = grid + offset
     sample_grid = normalize_coords(sample_grid)  # [B, H, W, 2] in [-1, 1]
-    warped_img = F.grid_sample(img, sample_grid, mode='bilinear', padding_mode=padding_mode)
+    # warped_img = F.grid_sample(img, sample_grid, mode='bilinear', padding_mode=padding_mode)
+    warped_img = F.grid_sample(img, sample_grid, mode='bilinear', padding_mode=padding_mode, align_corners=True)
 
     mask = torch.ones_like(img)
-    valid_mask = F.grid_sample(mask, sample_grid, mode='bilinear', padding_mode='zeros')
+    # valid_mask = F.grid_sample(mask, sample_grid, mode='bilinear', padding_mode='zeros')
+    valid_mask = F.grid_sample(mask, sample_grid, mode='bilinear', padding_mode='zeros', align_corners=True)
     valid_mask[valid_mask < 0.9999] = 0
     valid_mask[valid_mask > 0] = 1
     return warped_img, valid_mask

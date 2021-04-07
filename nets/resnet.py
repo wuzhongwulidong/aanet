@@ -130,7 +130,7 @@ class AANetFeature(nn.Module):
         self.layer1 = self._make_layer(Bottleneck, in_channels, layers[0])  # H/3
         self.layer2 = self._make_layer(Bottleneck, in_channels * 2, layers[1], stride=2)  # H/6
 
-        block = DeformBottleneck if feature_mdconv else Bottleneck
+        block = DeformBottleneck if feature_mdconv else Bottleneck  # AANet默认ResNet的后一部分使用DeformBottleneck
         self.layer3 = self._make_layer(block, in_channels * 4, layers[2], stride=2)  # H/12
 
         for m in self.modules():
@@ -191,4 +191,4 @@ class AANetFeature(nn.Module):
         layer2 = self.layer2(layer1)
         layer3 = self.layer3(layer2)
 
-        return [layer1, layer2, layer3]
+        return [layer1, layer2, layer3]  # H/3，H/6，H/12

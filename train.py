@@ -1,5 +1,7 @@
 import torch
+from torch.cuda import synchronize
 from torch.utils.data import DataLoader
+from torch import distributed
 
 import argparse
 import numpy as np
@@ -8,6 +10,7 @@ import os
 import nets
 import dataloader
 from dataloader import transforms
+from dataloader.dataloader import getDataLoader
 from utils import utils
 import model
 
@@ -16,14 +19,17 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--mode', default='test', type=str,
+parser.add_argument('--mode', default='val', type=str,
                     help='Validation mode on small subset or test mode on full test data')
+# 用于选择数据集：0: debug; 1: overFit; 2: Train
+parser.add_argument('--debug_overFit_train', default=1, type=int, help='For code debug only!')
 
 # Training data
 parser.add_argument('--data_dir', default='data/SceneFlow', type=str, help='Training dataset')
 parser.add_argument('--dataset_name', default='SceneFlow', type=str, help='Dataset name')
 
 parser.add_argument('--batch_size', default=64, type=int, help='Batch size for training')
+parser.add_argument('--accumulation_steps', default=4, type=int, help='Batch size for training')
 parser.add_argument('--val_batch_size', default=64, type=int, help='Batch size for validation')
 parser.add_argument('--num_workers', default=8, type=int, help='Number of workers for data loading')
 parser.add_argument('--img_height', default=288, type=int, help='Image height for training')
@@ -44,6 +50,7 @@ parser.add_argument('--max_epoch', default=64, type=int, help='Maximum epoch num
 parser.add_argument('--resume', action='store_true', help='Resume training from latest checkpoint')
 
 # AANet
+parser.add_argument('--useFeatureAtt', default=1, type=int, help='Whether to use Feature Attention: 1:use; 0:dont use')
 parser.add_argument('--feature_type', default='aanet', type=str, help='Type of feature extractor')
 parser.add_argument('--no_feature_mdconv', action='store_true', help='Whether to use mdconv for feature extraction')
 parser.add_argument('--feature_pyramid', action='store_true', help='Use pyramid feature')
@@ -86,14 +93,48 @@ parser.add_argument('--no_validate', action='store_true', help='No validation')
 parser.add_argument('--strict', action='store_true', help='Strict mode when loading checkpoints')
 parser.add_argument('--val_metric', default='epe', help='Validation metric to select best model')
 
-args = parser.parse_args()
-logger = utils.get_logger()
+#  尝试分布式训练:
+parser.add_argument("--local_rank", type=int)  # 必须有这一句，但是local_rank是torch.distributed.launch自动分配和传入的。
+parser.add_argument("--distributed", action='store_true', help="use DistributedDataParallel")
 
+args = parser.parse_args()
 utils.check_path(args.checkpoint_dir)
-utils.save_args(args)
+logger = utils.get_logger(os.path.join(args.checkpoint_dir, "trainLog.txt"))
+
+# 调整打印频率
+if args.debug_overFit_train in [0, 2]:
+    args.print_freq = 50
+    args.summary_freq = 100
+elif args.debug_overFit_train in [1]:
+    args.print_freq = 10
+    args.summary_freq = 50
+
+if args.distributed:
+    #  尝试分布式训练
+    # local_rank = torch.distributed.get_rank()
+    # local_rank表示本台机器上的进程序号,是由torch.distributed.launch自动分配和传入的。
+    local_rank = args.local_rank
+    # 根据local_rank来设定当前使用哪块GPU
+    torch.cuda.set_device(local_rank)
+    device = torch.device("cuda", local_rank)
+    # 初始化DDP，使用默认backend(nccl)就行
+    torch.distributed.init_process_group(backend="nccl")
+    print("args.local_rank={}".format(args.local_rank))
+else:
+    device = torch.device("cuda")
+
+# 尝试分布式训练
+local_master = True if not args.distributed else args.local_rank == 0
+utils.save_args(args) if local_master else None
+
+# 打印所用的参数
+if local_master:
+    logger.info('[Info] used parameters: {}'.format(vars(args)))
+
+torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
 
 filename = 'command_test.txt' if args.mode == 'test' else 'command_train.txt'
-utils.save_command(args.checkpoint_dir, filename)
+utils.save_command(args.checkpoint_dir, filename) if local_master else None
 
 
 def main():
@@ -102,43 +143,7 @@ def main():
     torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Train loader
-    train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
-                            transforms.RandomColor(),
-                            transforms.RandomVerticalFlip(),
-                            transforms.ToTensor(),  # 将图像数据转化为Tensor并除以255.0，将像素数值范围归一化到[0,1]之间且[H, W, C=3]->[C=3, H, W]
-                            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)  # 使用ImageNet数据集的均值和方差再做归一化
-                            ]
-    train_transform = transforms.Compose(train_transform_list)
-
-    train_data = dataloader.StereoDataset(data_dir=args.data_dir,
-                                          dataset_name=args.dataset_name,
-                                          mode='train' if args.mode != 'train_all' else 'train_all',
-                                          load_pseudo_gt=args.load_pseudo_gt,
-                                          transform=train_transform)
-
-    logger.info('=> {} training samples found in the training set'.format(len(train_data)))
-
-    train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers, pin_memory=True, drop_last=True)
-
-    # Validation loader
-    val_transform_list = [transforms.RandomCrop(args.val_img_height, args.val_img_width, validate=True),
-                          transforms.ToTensor(),
-                          transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
-                         ]
-    val_transform = transforms.Compose(val_transform_list)
-    val_data = dataloader.StereoDataset(data_dir=args.data_dir,
-                                        dataset_name=args.dataset_name,
-                                        mode=args.mode,
-                                        transform=val_transform)
-
-    val_loader = DataLoader(dataset=val_data, batch_size=args.val_batch_size, shuffle=False,
-                            num_workers=args.num_workers, pin_memory=True, drop_last=False)
+    train_loader, val_loader = getDataLoader(args, logger)
 
     # Network
     aanet = nets.AANet(args.max_disp,
@@ -149,6 +154,7 @@ def main():
                        feature_pyramid_network=args.feature_pyramid_network,
                        feature_similarity=args.feature_similarity,
                        aggregation_type=args.aggregation_type,
+                       useFeatureAtt=args.useFeatureAtt,
                        num_scales=args.num_scales,
                        num_fusions=args.num_fusions,
                        num_stage_blocks=args.num_stage_blocks,
@@ -158,22 +164,33 @@ def main():
                        mdconv_dilation=args.mdconv_dilation,
                        deformable_groups=args.deformable_groups).to(device)
 
-    logger.info('%s' % aanet)
+    # logger.info('%s' % aanet) if local_master else None
+    if local_master:
+        structure_of_net = os.path.join(args.checkpoint_dir, 'structure_of_net.txt')
+        with open(structure_of_net, 'w') as f:
+            f.write('%s' % aanet)
 
     if args.pretrained_aanet is not None:
         logger.info('=> Loading pretrained AANet: %s' % args.pretrained_aanet)
         # Enable training from a partially pretrained model
         utils.load_pretrained_net(aanet, args.pretrained_aanet, no_strict=(not args.strict))
 
-    if torch.cuda.device_count() > 1:
-        logger.info('=> Use %d GPUs' % torch.cuda.device_count())
-        aanet = torch.nn.DataParallel(aanet)
+    aanet.to(device)
+    logger.info('=> Use %d GPUs' % torch.cuda.device_count()) if local_master else None
+    # if torch.cuda.device_count() > 1:
+    if args.distributed:
+        # aanet = torch.nn.DataParallel(aanet)
+        #  尝试分布式训练
+        aanet = torch.nn.SyncBatchNorm.convert_sync_batchnorm(aanet)
+        aanet = torch.nn.parallel.DistributedDataParallel(aanet, device_ids=[local_rank],
+                                                          output_device=local_rank)
+        synchronize()
 
     # Save parameters
     num_params = utils.count_parameters(aanet)
     logger.info('=> Number of trainable parameters: %d' % num_params)
     save_name = '%d_parameters' % num_params
-    open(os.path.join(args.checkpoint_dir, save_name), 'a').close()  # 这是个空文件，只是通过其文件名称指示模型有多少个需要训练的参数
+    open(os.path.join(args.checkpoint_dir, save_name), 'a').close() if local_master else None # 这是个空文件，只是通过其文件名称指示模型有多少个需要训练的参数
 
     # Optimizer
     # Learning rate for offset learning is set 0.1 times those of existing layers
@@ -225,13 +242,18 @@ def main():
 
     if args.evaluate_only:
         assert args.val_batch_size == 1
-        train_model.validate(val_loader)
+        train_model.validate(val_loader, local_master)  # test模式。应该设置--evaluate_only，且--mode为“test”。
     else:
-        for _ in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
+        for epoch in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
             if not args.evaluate_only:
-                train_model.train(train_loader)
+                # ensure distribute worker sample different data,
+                # set different random seed by passing epoch to sampler
+                if args.distributed:
+                    train_loader.sampler.set_epoch(epoch)
+                    logger.info('train_loader.sampler.set_epoch({})'.format(epoch))
+                train_model.train(train_loader, local_master)
             if not args.no_validate:
-                train_model.validate(val_loader)
+                train_model.validate(val_loader, local_master)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
                 lr_scheduler.step()  # 调整Learning Rate
 

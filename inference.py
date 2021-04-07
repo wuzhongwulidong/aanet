@@ -92,6 +92,7 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)])
     test_data = dataloader.StereoDataset(data_dir=args.data_dir,
+                                         debug_overFit_train=args.debug_overFit_train,
                                          dataset_name=args.dataset_name,
                                          mode=args.mode,
                                          save_filename=True,

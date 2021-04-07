@@ -11,7 +11,7 @@ class DisparityEstimation(nn.Module):
         self.match_similarity = match_similarity
 
     def forward(self, cost_volume):
-        assert cost_volume.dim() == 4
+        assert cost_volume.dim() == 4  # [B, D, H, W]
 
         # Matching similarity or matching cost
         cost_volume = cost_volume if self.match_similarity else -cost_volume
@@ -25,6 +25,6 @@ class DisparityEstimation(nn.Module):
             disp_candidates = torch.arange(0, max_disp).type_as(prob_volume)
 
         disp_candidates = disp_candidates.view(1, cost_volume.size(1), 1, 1)
-        disp = torch.sum(prob_volume * disp_candidates, 1, keepdim=False)  # [B, H, W]
+        disp = torch.sum(prob_volume * disp_candidates, 1, keepdim=False)  # [B, D, H, W]->[B, H, W]
 
         return disp
