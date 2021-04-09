@@ -82,8 +82,10 @@ class Model(object):
                 pseudo_pyramid_loss = []
 
                 # Loss weights
-                if len(pred_disp_pyramid) == 5:
+                if len(pred_disp_pyramid) == 5 and args.feature_type == 'aanet':
                     pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0, 1.0]  # AANet and AANet+
+                elif len(pred_disp_pyramid) == 7 and args.feature_type == 'hitnet_feature':
+                    pyramid_weight = [1 / 3, 2 / 3, 3 / 4, 1.0, 1.0, 1.0, 1.0]  # my coarse2fine_module hitnet
                 elif len(pred_disp_pyramid) == 4:
                     pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0]
                 elif len(pred_disp_pyramid) == 3:
@@ -185,9 +187,13 @@ class Model(object):
                     thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)  # mask.shape=[B, H, W]
                     thres2 = thres_metric(pred_disp, gt_disp, mask, 2.0)
                     thres3 = thres_metric(pred_disp, gt_disp, mask, 3.0)
+                    thres10 = thres_metric(pred_disp, gt_disp, mask, 10.0)
+                    thres20 = thres_metric(pred_disp, gt_disp, mask, 20.0)
                     self.train_writer.add_scalar('train/thres1', thres1.item(), self.num_iter)
                     self.train_writer.add_scalar('train/thres2', thres2.item(), self.num_iter)
                     self.train_writer.add_scalar('train/thres3', thres3.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/thres10', thres10.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/thres20', thres20.item(), self.num_iter)
 
         self.epoch += 1
 
@@ -242,6 +248,8 @@ class Model(object):
         val_thres1 = 0
         val_thres2 = 0
         val_thres3 = 0
+        val_thres10 = 0
+        val_thres20 = 0
 
         val_count = 0
 
@@ -281,12 +289,16 @@ class Model(object):
             thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)
             thres2 = thres_metric(pred_disp, gt_disp, mask, 2.0)
             thres3 = thres_metric(pred_disp, gt_disp, mask, 3.0)
+            thres10 = thres_metric(pred_disp, gt_disp, mask, 10.0)
+            thres20 = thres_metric(pred_disp, gt_disp, mask, 20.0)
 
             val_epe += epe.item()
             val_d1 += d1.item()
             val_thres1 += thres1.item()
             val_thres2 += thres2.item()
             val_thres3 += thres3.item()
+            val_thres10 += thres10.item()
+            val_thres20 += thres20.item()
 
             # Save 3 images for visualization
             if not args.evaluate_only:
@@ -308,6 +320,8 @@ class Model(object):
         mean_thres1 = val_thres1 / valid_samples
         mean_thres2 = val_thres2 / valid_samples
         mean_thres3 = val_thres3 / valid_samples
+        mean_thres10 = val_thres10 / valid_samples
+        mean_thres20 = val_thres20 / valid_samples
 
         # Save validation results
         with open(val_file, 'a') as f:
@@ -317,6 +331,8 @@ class Model(object):
             f.write('thres1: %.4f\t' % mean_thres1)
             f.write('thres2: %.4f\t' % mean_thres2)
             f.write('thres3: %.4f\n' % mean_thres3)
+            f.write('thres10: %.4f\t' % mean_thres10)
+            f.write('thres20: %.4f\n' % mean_thres20)
             f.write('dataset_name= %s\t mode=%s\n' % (args.dataset_name, args.mode))
 
         logger.info('=> Mean validation epe of epoch %d: %.3f' % (self.epoch, mean_epe))
@@ -327,6 +343,8 @@ class Model(object):
             self.train_writer.add_scalar('val/thres1', mean_thres1, self.epoch)
             self.train_writer.add_scalar('val/thres2', mean_thres2, self.epoch)
             self.train_writer.add_scalar('val/thres3', mean_thres3, self.epoch)
+            self.train_writer.add_scalar('val/thres10', mean_thres10, self.epoch)
+            self.train_writer.add_scalar('val/thres20', mean_thres20, self.epoch)
 
         if not args.evaluate_only:
             if args.val_metric == 'd1':

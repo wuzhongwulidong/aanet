@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from nets.feature import (StereoNetFeature, PSMNetFeature, GANetFeature, GCNetFeature,
                           FeaturePyrmaid, FeaturePyramidNetwork)
 from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAttention, multiScalePAMAttention
+from nets.myCoarse2FineLUtils import coarse2fine_module
+from nets.myHITNetFeature import hitnet_feature
 from nets.resnet import AANetFeature
 from nets.cost import CostVolume, CostVolumePyramid
 from nets.aggregation import (StereoNetAggregation, GCNetAggregation, PSMNetBasicAggregation,
@@ -62,105 +64,118 @@ class AANet(nn.Module):
         #     self.feature_extractor = myRawFeature()
         #     self.max_disp = max_disp // 4
         #     self.attentionBlocks = myAttentionBlock(in_channels=512, key_channels=256, value_channels=512)
+        elif feature_type == 'hitnet_feature':
+            # hitnet_feature返回的特征尺度比较多：# 1/16, 1/8, 1/4, 1/2, 1/1
+            self.feature_extractor = hitnet_feature()
+            self.max_disp = max_disp
+            # hitnet特征本身Unet获得的多尺度特征，不再需要做特征金字塔处理。
+            self.feature_pyramid_network = None
+            self.feature_pyramid = None
         else:
             raise NotImplementedError
 
-        # self.fpn用来生成最终的num_scales=3个尺度的特征。
-        # 情形1：self.feature_extractor输出三尺度的特征：上采样和下采样同尺度间融合，输出仍是三尺度的特征。
-        if feature_pyramid_network:
-            if feature_type == 'aanet':
-                in_channels = [32 * 4, 32 * 8, 32 * 16, ]
-            else:
-                in_channels = [32, 64, 128]
-            self.fpn = FeaturePyramidNetwork(in_channels=in_channels,
-                                             out_channels=32 * 4)
-            featureAttentionInChl = [128, 128, 128]
-        # 情形2：self.feature_extractor输出的是一个尺度的特征：需要生成三个尺度的特征。
-        elif feature_pyramid:
-            self.fpn = FeaturePyrmaid()
-            featureAttentionInChl = [32, 64, 128]
+        # # self.fpn用来生成最终的num_scales=3个尺度的特征。
+        # # 情形1：self.feature_extractor输出三尺度的特征：上采样和下采样同尺度间融合，输出仍是三尺度的特征。
+        # if feature_pyramid_network:
+        #     if feature_type == 'aanet':
+        #         in_channels = [32 * 4, 32 * 8, 32 * 16, ]
+        #     else:
+        #         in_channels = [32, 64, 128]
+        #     self.fpn = FeaturePyramidNetwork(in_channels=in_channels,
+        #                                      out_channels=32 * 4)
+        #     featureAttentionInChl = [128, 128, 128]
+        # # 情形2：self.feature_extractor输出的是一个尺度的特征：需要生成三个尺度的特征。
+        # elif feature_pyramid:
+        #     self.fpn = FeaturePyrmaid()
+        #     featureAttentionInChl = [32, 64, 128]
 
         # self.multiScaleAttention = multiScaleAttention(featureAttentionInChl) if useFeatureAtt else None
-        self.multiScaleAttention = multiScalePAMAttention(featureAttentionInChl, feature_pyramid_network) if useFeatureAtt else None
+        # self.multiScaleAttention = multiScalePAMAttention(featureAttentionInChl, feature_pyramid_network) if useFeatureAtt else None
 
-        # Cost volume construction
-        # 情形1：多个尺度的特征
-        if feature_type == 'aanet' or feature_pyramid or feature_pyramid_network:
-            cost_volume_module = CostVolumePyramid
-        # 情形2：只有单尺度的特征
-        else:
-            cost_volume_module = CostVolume
-        self.cost_volume = cost_volume_module(self.max_disp,
-                                              feature_similarity=feature_similarity)
+        # # Cost volume construction
+        # # 情形1：多个尺度的特征
+        # if feature_type == 'aanet' or feature_pyramid or feature_pyramid_network:
+        #     cost_volume_module = CostVolumePyramid
+        # # 情形2：只有单尺度的特征
+        # else:
+        #     cost_volume_module = CostVolume
+        # self.cost_volume = cost_volume_module(self.max_disp,
+        #                                       feature_similarity=feature_similarity)
 
-        # Cost aggregation
-        max_disp = self.max_disp
-        if feature_similarity == 'concat':
-            in_channels = 64
-        else:
-            in_channels = 32  # StereoNet uses feature difference
+        self.coarse2fine_module = coarse2fine_module(self.max_disp, feature_similarity='correlation')
 
-        if aggregation_type == 'adaptive':
-            self.aggregation = AdaptiveAggregation(max_disp=max_disp,
-                                                   num_scales=num_scales,
-                                                   num_fusions=num_fusions,
-                                                   num_stage_blocks=num_stage_blocks,
-                                                   num_deform_blocks=num_deform_blocks,
-                                                   mdconv_dilation=mdconv_dilation,
-                                                   deformable_groups=deformable_groups,
-                                                   intermediate_supervision=not no_intermediate_supervision)
-        elif aggregation_type == 'psmnet_basic':
-            self.aggregation = PSMNetBasicAggregation(max_disp=max_disp)
-        elif aggregation_type == 'psmnet_hourglass':
-            self.aggregation = PSMNetHGAggregation(max_disp=max_disp)
-        elif aggregation_type == 'gcnet':
-            self.aggregation = GCNetAggregation()
-        elif aggregation_type == 'stereonet':
-            self.aggregation = StereoNetAggregation(in_channels=in_channels)
-        else:
-            raise NotImplementedError
+        self.refinement_2x = StereoDRNetRefinement()
+        self.refinement_1x = StereoDRNetRefinement()
 
-        match_similarity = False if feature_similarity in ['difference', 'concat'] else True
 
-        if 'psmnet' in self.aggregation_type:
-            max_disp = self.max_disp * 4  # PSMNet directly upsamples cost volume
-            match_similarity = True  # PSMNet learns similarity for concatenation
+        # # Cost aggregation
+        # max_disp = self.max_disp
+        # if feature_similarity == 'concat':
+        #     in_channels = 64
+        # else:
+        #     in_channels = 32  # StereoNet uses feature difference
 
-        # Disparity estimation
-        self.disparity_estimation = DisparityEstimation(max_disp, match_similarity)
+        # if aggregation_type == 'adaptive':
+        #     self.aggregation = AdaptiveAggregation(max_disp=max_disp,
+        #                                            num_scales=num_scales,
+        #                                            num_fusions=num_fusions,
+        #                                            num_stage_blocks=num_stage_blocks,
+        #                                            num_deform_blocks=num_deform_blocks,
+        #                                            mdconv_dilation=mdconv_dilation,
+        #                                            deformable_groups=deformable_groups,
+        #                                            intermediate_supervision=not no_intermediate_supervision)
+        # elif aggregation_type == 'psmnet_basic':
+        #     self.aggregation = PSMNetBasicAggregation(max_disp=max_disp)
+        # elif aggregation_type == 'psmnet_hourglass':
+        #     self.aggregation = PSMNetHGAggregation(max_disp=max_disp)
+        # elif aggregation_type == 'gcnet':
+        #     self.aggregation = GCNetAggregation()
+        # elif aggregation_type == 'stereonet':
+        #     self.aggregation = StereoNetAggregation(in_channels=in_channels)
+        # else:
+        #     raise NotImplementedError
+        #
+        # match_similarity = False if feature_similarity in ['difference', 'concat'] else True
+        #
+        # if 'psmnet' in self.aggregation_type:
+        #     max_disp = self.max_disp * 4  # PSMNet directly upsamples cost volume
+        #     match_similarity = True  # PSMNet learns similarity for concatenation
 
-        # Refinement
-        if self.refinement_type is not None and self.refinement_type != 'None':
-            if self.refinement_type in ['stereonet', 'stereodrnet', 'hourglass']:
-                refine_module_list = nn.ModuleList()
-                for i in range(num_downsample):
-                    if self.refinement_type == 'stereonet':
-                        refine_module_list.append(StereoNetRefinement())
-                    elif self.refinement_type == 'stereodrnet':
-                        refine_module_list.append(StereoDRNetRefinement())
-                    elif self.refinement_type == 'hourglass':
-                        refine_module_list.append(HourglassRefinement())
-                    else:
-                        raise NotImplementedError
+        # # Disparity estimation
+        # self.disparity_estimation = DisparityEstimation(max_disp, match_similarity)
 
-                self.refinement = refine_module_list
-            else:
-                raise NotImplementedError
+        # # Refinement
+        # if self.refinement_type is not None and self.refinement_type != 'None':
+        #     if self.refinement_type in ['stereonet', 'stereodrnet', 'hourglass']:
+        #         refine_module_list = nn.ModuleList()
+        #         for i in range(num_downsample):
+        #             if self.refinement_type == 'stereonet':
+        #                 refine_module_list.append(StereoNetRefinement())
+        #             elif self.refinement_type == 'stereodrnet':
+        #                 refine_module_list.append(StereoDRNetRefinement())
+        #             elif self.refinement_type == 'hourglass':
+        #                 refine_module_list.append(HourglassRefinement())
+        #             else:
+        #                 raise NotImplementedError
+        #
+        #         self.refinement = refine_module_list
+        #     else:
+        #         raise NotImplementedError
 
     def feature_extraction(self, img):
         feature = self.feature_extractor(img)
-        if self.feature_pyramid_network or self.feature_pyramid:
-            feature = self.fpn(feature)
+        # if self.feature_pyramid_network or self.feature_pyramid:
+        #     feature = self.fpn(feature)
         return feature
 
-    def doAttention(self, left_feature, right_feature):
-        """
-        left_feature,right_feature都是三个尺度，尺度之间相差1/2：高分辨率->低分辨率
-        """
-        if self.multiScaleAttention is not None:
-            left_feature, right_feature = self.multiScaleAttention(left_feature, right_feature)
-
-        return left_feature, right_feature
+    # def doAttention(self, left_feature, right_feature):
+    #     """
+    #     left_feature,right_feature都是三个尺度，尺度之间相差1/2：高分辨率->低分辨率
+    #     """
+    #     if self.multiScaleAttention is not None:
+    #         left_feature, right_feature = self.multiScaleAttention(left_feature, right_feature)
+    #
+    #     return left_feature, right_feature
 
     def cost_volume_construction(self, left_feature, right_feature):
         cost_volume = self.cost_volume(left_feature, right_feature)
@@ -229,15 +244,26 @@ class AANet(nn.Module):
         return disparity_pyramid
 
     def forward(self, left_img, right_img):
-        left_feature = self.feature_extraction(left_img)
+        left_feature = self.feature_extraction(left_img)  # hitnet_feature H：1/16, 1/8, 1/4, 1/2, 1/1。C：32, 24, 24, 16, 16
         right_feature = self.feature_extraction(right_img)
 
-        left_feature, right_feature = self.doAttention(left_feature, right_feature)  # H/3, H/6, H/12
+        # disp_16x, disp_8x, disp_4x, disp_2x, disp_1x: 1/16, 1/8, 1/4, 1/2, 1/1   [B, 1, H, W]
+        disps = self.coarse2fine_module(left_feature, right_feature)
 
-        cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12. 可能是3D代价体或者4D代价体
-        aggregation = self.aggregation(cost_volume)
+        refined_disps = self.disparity_refinement(left_img, right_img, *disps)
 
-        disparity_pyramid = self.disparity_computation(aggregation)  # H/12, H/6, H/3
-        disparity_pyramid += self.disparity_refinement(left_img, right_img,
-                                                       disparity_pyramid[-1])
-        return disparity_pyramid  # H/12, H/6, H/3, H/2, H: 其中H/2, H分辨率的视差图，是从H/3进行视差精确化得到的。
+        return refined_disps
+
+
+    def disparity_refinement(self, left_img, right_img, disp_16x, disp_8x, disp_4x, disp_2x, disp_1x):
+        """
+        :param left_img:
+        :param right_img:
+        :param disparity: [B, 1, H, W]
+        :return:
+        """
+
+        refined_2x = self.refinement_2x(disp_2x, left_img, right_img)
+        refined_1x = self.refinement_1x(disp_1x, left_img, right_img)
+
+        return disp_16x, disp_8x, disp_4x, disp_2x, disp_1x, refined_2x, refined_1x
