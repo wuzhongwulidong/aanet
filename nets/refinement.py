@@ -84,6 +84,7 @@ class StereoDRNetRefinement(nn.Module):
         if scale_factor == 1.0:
             disp = low_disp
         else:
+            # 视差图上采样到和图像left_img尺寸一致
             disp = F.interpolate(low_disp, size=left_img.size()[-2:], mode='bilinear', align_corners=False)
             disp = disp * scale_factor
 

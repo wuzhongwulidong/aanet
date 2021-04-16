@@ -107,7 +107,6 @@ class AANet(nn.Module):
         self.refinement_2x = StereoDRNetRefinement()
         self.refinement_1x = StereoDRNetRefinement()
 
-
         # # Cost aggregation
         # max_disp = self.max_disp
         # if feature_similarity == 'concat':
@@ -244,26 +243,32 @@ class AANet(nn.Module):
         return disparity_pyramid
 
     def forward(self, left_img, right_img):
-        left_feature = self.feature_extraction(left_img)  # hitnet_feature H：1/16, 1/8, 1/4, 1/2, 1/1。C：32, 24, 24, 16, 16
+        left_feature = self.feature_extraction(
+            left_img)  # hitnet_feature H：1/16, 1/8, 1/4, 1/2, 1/1。C：32, 24, 24, 16, 16
         right_feature = self.feature_extraction(right_img)
 
         # disp_16x, disp_8x, disp_4x, disp_2x, disp_1x: 1/16, 1/8, 1/4, 1/2, 1/1   [B, 1, H, W]
         disps = self.coarse2fine_module(left_feature, right_feature)
 
-        refined_disps = self.disparity_refinement(left_img, right_img, *disps)
+        refined_disps = self.myDisparity_refinement(left_img, right_img, *disps)
 
         return refined_disps
 
-
-    def disparity_refinement(self, left_img, right_img, disp_16x, disp_8x, disp_4x, disp_2x, disp_1x):
+    def myDisparity_refinement(self, left_img, right_img, disp_16x, disp_8x, disp_4x, disp_2x, disp_1x):
         """
         :param left_img:
         :param right_img:
         :param disparity: [B, 1, H, W]
         :return:
         """
+        # 2x尺度的视差
+        curr_left_img = F.interpolate(left_img, scale_factor=0.5, mode='bilinear', align_corners=False)
+        curr_right_img = F.interpolate(right_img, scale_factor=0.5, mode='bilinear', align_corners=False)
+        refined_2x = self.refinement_2x(disp_2x, curr_left_img, curr_right_img)
+        # refined_2x = disp_2x
 
-        refined_2x = self.refinement_2x(disp_2x, left_img, right_img)
+        # 1x尺度的视差
         refined_1x = self.refinement_1x(disp_1x, left_img, right_img)
+        # refined_1x = disp_1x
 
         return disp_16x, disp_8x, disp_4x, disp_2x, disp_1x, refined_2x, refined_1x
