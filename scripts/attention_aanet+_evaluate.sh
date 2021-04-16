@@ -31,8 +31,9 @@ python train.py \
 --img_width 576 \
 --val_img_height 576 \
 --val_img_width 960 \
---feature_type aanet \
---feature_pyramid_network \
+--feature_type ganet \
+--feature_pyramid \
+--refinement_type hourglass \
 --milestones 20,30,40,50,60 \
 --max_epoch 64 \
 --evaluate_only
