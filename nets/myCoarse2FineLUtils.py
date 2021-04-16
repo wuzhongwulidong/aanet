@@ -108,8 +108,8 @@ def myRegressInitDisp(cost_volume, max_disp, regress_type='exp_avg', similarityO
 def myDispUpsample(disp, upScale=2):
     assert disp.dim() == 4  # [B, 1, H, W]
 
-    # upDisp = F.interpolate(disp, scale_factor=upScale, mode='bilinear', align_corners=False) * upScale
-    upDisp = F.interpolate(disp, scale_factor=upScale, mode='nearest') * upScale
+    upDisp = F.interpolate(disp, scale_factor=upScale, mode='bilinear', align_corners=False) * upScale
+    # upDisp = F.interpolate(disp, scale_factor=upScale, mode='nearest') * upScale
 
     return upDisp
 
