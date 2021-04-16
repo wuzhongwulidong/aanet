@@ -6,9 +6,8 @@
 #python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py --distributed
 python train.py \
 --mode val \
---debug_overFit_train 1 \
+--debug_overFit_train 2 \
 --useFeatureAtt 1 \
---max_epoch 64 \
 --accumulation_steps 1 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/coarse2fine_aanet_sceneflow \
@@ -20,8 +19,10 @@ python train.py \
 --val_img_width 960 \
 --feature_type hitnet_feature \
 --feature_pyramid_network \
---milestones 100,200,300,500,600 \
---max_epoch 1000
+--milestones 20,30,40,50,60 \
+--max_epoch 64
+#--milestones 100,200,300,500,600 \
+#--max_epoch 1000
 
 #--milestones 20,30,40,50,60 \
 #--max_epoch 64

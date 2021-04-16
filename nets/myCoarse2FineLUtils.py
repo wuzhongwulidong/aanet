@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nets.deform import SimpleBottleneck
+from nets.deform import SimpleBottleneck, DeformSimpleBottleneck
+from nets.feature import BasicBlock
+from nets.refinement import conv2d
 from nets.warp import disp_warp
 
 
@@ -106,7 +108,8 @@ def myRegressInitDisp(cost_volume, max_disp, regress_type='exp_avg', similarityO
 def myDispUpsample(disp, upScale=2):
     assert disp.dim() == 4  # [B, 1, H, W]
 
-    upDisp = F.interpolate(disp, scale_factor=upScale, mode='bilinear', align_corners=False) * upScale
+    # upDisp = F.interpolate(disp, scale_factor=upScale, mode='bilinear', align_corners=False) * upScale
+    upDisp = F.interpolate(disp, scale_factor=upScale, mode='nearest') * upScale
 
     return upDisp
 
@@ -114,13 +117,18 @@ def myDispUpsample(disp, upScale=2):
 class CostAggregation(nn.Module):
     """
     """
-    def __init__(self, in_c, out_c, resblk_num=2):
+    def __init__(self, in_c, out_c, resblk_num=2, modulation=True,  mdconv_dilation=2, deformable_groups=1):
         super(CostAggregation, self).__init__()
         self.conv0 = BasicConv2d(in_c, out_c, 1, 1, 0, 1)
 
         resblks = nn.ModuleList()
         for i in range(resblk_num):
-            resblks.append(SimpleBottleneck(out_c, out_c))
+            # resblks.append(SimpleBottleneck(out_c, out_c))
+            # resblks.append(DeformSimpleBottleneck(out_c, out_c, modulation=True,
+            #                                       mdconv_dilation=2, deformable_groups=2))
+            resblks.append(DeformSimpleBottleneck(out_c, out_c, modulation=modulation,
+                                                  mdconv_dilation=mdconv_dilation,
+                                                  deformable_groups=deformable_groups))
         self.resblocks = nn.Sequential(*resblks)
 
         self.lastconv = nn.Conv2d(out_c, out_c, 1, 1, 0, 1, bias=False)
@@ -150,26 +158,26 @@ class coarse2fine_module(nn.Module):
 
         # =======================1/8==================
         self.max_disp_8x = self.max_disp // 8   # 192/8 = 24
-        self.sCount_8x = self.max_disp_8x // 1  # 24
-        # self.cost_volume_module_8x = CostVolume(max_disp // (2 ** 3), feature_similarity)
+        self.sCount_8x = self.max_disp_8x // 1 + 1  # 24 + 1
+        self.myDispUpsamRfModule_8x = myDispUpsamRfModule(in_channels=24)
         self.cost_aggregration_8x = CostAggregation(self.sCount_8x, self.sCount_8x, 2)  # in_c, out_c, hid_c, resblk_num
 
         # =======================1/4==================
         self.max_disp_4x = self.max_disp // 4   # 192/4 = 48
-        self.sCount_4x = self.max_disp_4x // 2  # 24
-        # self.cost_volume_module_4x = CostVolume(max_disp // (2 ** 2), feature_similarity)
+        self.sCount_4x = self.max_disp_4x // 2 + 1  # 24 + 1
+        self.myDispUpsamRfModule_4x = myDispUpsamRfModule(in_channels=24)
         self.cost_aggregration_4x = CostAggregation(self.sCount_4x, self.sCount_4x, 2)  # in_c, out_c, resblk_num
 
         # =======================1/2==================
         self.max_disp_2x = self.max_disp // 2   # 192/2 = 96
-        self.sCount_2x = self.max_disp_2x // 4  # 24
-        # self.cost_volume_module_2x = CostVolume(max_disp // (2 ** 1), feature_similarity)
+        self.sCount_2x = self.max_disp_2x // 4 + 1  # 24 + 1
+        self.myDispUpsamRfModule_2x = myDispUpsamRfModule(in_channels=16)
         self.cost_aggregration_2x = CostAggregation(self.sCount_2x, self.sCount_2x, 2)  # in_c, out_c, resblk_num
 
         # =======================1/1==================
         self.max_disp_1x = self.max_disp // 1   # 192/1 = 192
-        self.sCount_1x = self.max_disp_1x // 16  # 16
-        # self.cost_volume_module_1x = CostVolume(max_disp // (2 ** 0), feature_similarity)
+        self.sCount_1x = self.max_disp_1x // 16 + 1  # 16 + 1
+        self.myDispUpsamRfModule_1x = myDispUpsamRfModule(in_channels=16)
         self.cost_aggregration_1x = CostAggregation(self.sCount_1x, self.sCount_1x, 2)  # in_c, out_c, hid_c, resblk_num
 
     def forward(self, left_feature_pyramid, right_feature_pyramid):
@@ -191,6 +199,8 @@ class coarse2fine_module(nn.Module):
 
         preDisp_8x = myDispUpsample(disp_16x, upScale=2)
 
+        preDisp_8x = self.myDispUpsamRfModule_8x(preDisp_8x, left_feature_pyramid[1], right_feature_pyramid[1])
+
         # =======================1/8==================
         cost_volume_8x, dispCandiates_8x = mySampleCostVolume(preDisp_8x, left_feature_pyramid[1], right_feature_pyramid[1],
                                             self.max_disp_8x, self.sCount_8x)  # [B, sampleCount, H/8, W/8], [B, sampleCount, H/8, W/8]
@@ -198,6 +208,8 @@ class coarse2fine_module(nn.Module):
         disp_8x = myRegressSampledDisp(cost_volume_8x, dispCandiates_8x)
 
         preDisp_4x = myDispUpsample(disp_8x, upScale=2)
+
+        preDisp_4x = self.myDispUpsamRfModule_4x(preDisp_4x, left_feature_pyramid[2], right_feature_pyramid[2])
 
         # =======================1/4==================
         cost_volume_4x, dispCandiates_4x = mySampleCostVolume(preDisp_4x, left_feature_pyramid[2], right_feature_pyramid[2],
@@ -208,6 +220,8 @@ class coarse2fine_module(nn.Module):
 
         preDisp_2x = myDispUpsample(disp_4x, upScale=2)
 
+        preDisp_2x = self.myDispUpsamRfModule_2x(preDisp_2x, left_feature_pyramid[3], right_feature_pyramid[3])
+
         # =======================1/2==================
         cost_volume_2x, dispCandiates_2x = mySampleCostVolume(preDisp_2x, left_feature_pyramid[3], right_feature_pyramid[3],
                                             self.max_disp_2x, self.sCount_2x)  # [B, sampleCount, H/8, W/8], [B, sampleCount, H/8, W/8]
@@ -215,6 +229,8 @@ class coarse2fine_module(nn.Module):
         disp_2x = myRegressSampledDisp(cost_volume_2x, dispCandiates_2x)
 
         preDisp_1x = myDispUpsample(disp_2x, upScale=2)
+
+        preDisp_1x = self.myDispUpsamRfModule_1x(preDisp_1x, left_feature_pyramid[4], right_feature_pyramid[4])
 
         # =======================1/1==================
         cost_volume_1x, dispCandiates_1x = mySampleCostVolume(preDisp_1x, left_feature_pyramid[4], right_feature_pyramid[4],
@@ -228,7 +244,53 @@ class coarse2fine_module(nn.Module):
         disp_2x = disp_2x.squeeze(1)
         disp_1x = disp_1x.squeeze(1)
 
-        return disp_16x, disp_8x, disp_4x, disp_2x, disp_1x  # 1/16, 1/8, 1/4, 1/2, 1/1
+        return disp_16x, disp_8x, disp_4x, disp_2x, disp_1x  #  1/16, 1/8, 1/4, 1/2, 1/1
+
+
+class myDispUpsamRfModule(nn.Module):
+    def __init__(self, in_channels):
+        super(myDispUpsamRfModule, self).__init__()
+
+        # self.conv1 = conv2d(in_channels * 2, 16)
+        # self.conv2 = conv2d(1, 16)  # on low disparity
+        #
+        # self.dilation_list = [1, 2, 4, 8, 1, 1]
+        # self.dilated_blocks = nn.ModuleList()
+        #
+        # for dilation in self.dilation_list:
+        #     self.dilated_blocks.append(BasicBlock(32, 32, stride=1, dilation=dilation))
+        #
+        # self.dilated_blocks = nn.Sequential(*self.dilated_blocks)
+        #
+        # self.final_conv = nn.Conv2d(32, 1, 3, 1, 1)
+
+    def forward(self, low_disp, left_img, right_img):
+        # assert low_disp.dim() == 3
+        # low_disp = low_disp.unsqueeze(1)  # [B, 1, H, W]
+        # scale_factor = left_img.size(-1) / low_disp.size(-1)
+        # if scale_factor == 1.0:
+        #     disp = low_disp
+        # else:
+        #     disp = F.interpolate(low_disp, size=left_img.size()[-2:], mode='bilinear', align_corners=False)
+        #     disp = disp * scale_factor
+        #
+        # # Warp right image to left view with current disparity
+        # warped_right = disp_warp(right_img, disp)  # [B, C, H, W]
+        # error = warped_right - left_img  # [B, C, H, W]
+        #
+        # concat1 = torch.cat((error, left_img), dim=1)  # [B, 6, H, W]
+        #
+        # conv1 = self.conv1(concat1)  # [B, 16, H, W]
+        # conv2 = self.conv2(disp)  # [B, 16, H, W]
+        # concat2 = torch.cat((conv1, conv2), dim=1)  # [B, 32, H, W]
+        #
+        # out = self.dilated_blocks(concat2)  # [B, 32, H, W]
+        # residual_disp = self.final_conv(out)  # [B, 1, H, W]
+        #
+        # disp = F.relu(disp + residual_disp, inplace=True)  # [B, 1, H, W]
+        # disp = disp.squeeze(1)  # [B, H, W]
+
+        return low_disp
 
 
 class CostVolume(nn.Module):
@@ -374,8 +436,4 @@ class ResBlock(nn.Module):
         if self.add_relu:
             out = self.relu(out)
         return out
-
-
-
-
 

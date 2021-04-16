@@ -252,7 +252,7 @@ def main():
                     train_loader.sampler.set_epoch(epoch)
                     logger.info('train_loader.sampler.set_epoch({})'.format(epoch))
                 train_model.train(train_loader, local_master)
-            if not args.no_validate and epoch % 5 == 0:
+            if not args.no_validate and epoch % 1 == 0:
                 train_model.validate(val_loader, local_master)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
                 lr_scheduler.step()  # 调整Learning Rate
