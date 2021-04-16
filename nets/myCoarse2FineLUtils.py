@@ -176,7 +176,7 @@ class coarse2fine_module(nn.Module):
 
         # =======================1/1==================
         self.max_disp_1x = self.max_disp // 1   # 192/1 = 192
-        self.sCount_1x = self.max_disp_1x // 16 + 1  # 16 + 1
+        self.sCount_1x = self.max_disp_1x // 16 + 1  # 12 + 1
         self.myDispUpsamRfModule_1x = myDispUpsamRfModule(in_channels=16)
         self.cost_aggregration_1x = CostAggregation(self.sCount_1x, self.sCount_1x, 2)  # in_c, out_c, hid_c, resblk_num
 
