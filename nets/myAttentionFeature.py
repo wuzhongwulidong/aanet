@@ -163,6 +163,26 @@ class AttentionBlock_(PixelAttentionBlock_):
         return context
 
 
+class myFuseBlock_(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(myFuseBlock_, self).__init__()
+
+        # self.fuse = nn.Sequential(
+        #     nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True),
+        #     nn.BatchNorm2d(out_channels),
+        #     nn.LeakyReLU(0.1, inplace=True),
+        #     nn.Conv2d(out_channels, out_channels, 1, 1, 1, bias=True),
+        #     nn.BatchNorm2d(out_channels),
+        #     nn.LeakyReLU(0.1, inplace=True))
+        self.fuse = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 1, 1, 1, bias=True),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(0.1, inplace=True))
+
+    def forward(self, x):
+        return self.fuse(x)
+
+
 class myAttentionBlock(nn.Module):
     def __init__(self, in_channels, key_channels, value_channels, layer_names=None):
         super(myAttentionBlock, self).__init__()
@@ -173,18 +193,36 @@ class myAttentionBlock(nn.Module):
         self.layers = nn.ModuleList([AttentionBlock_(in_channels, key_channels, value_channels)
                                      for _ in range(len(layer_names))])
 
+        self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+                                    for _ in range(len(layer_names))])
+        self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+                                    for _ in range(len(layer_names))])
+
     def forward(self, x, y):
-        for layer, name in zip(self.layers, self.names):
+        for layer, name, fuse_x, fuse_y in zip(self.layers, self.names, self.fuse_x, self.fuse_y):
             if name == 'cross':
-                delta_x, delta_y = layer(x, y), layer(y, x)
+                ctxt_x, ctxt_y = layer(x, y), layer(y, x)
             elif name == 'self':
-                delta_x, delta_y = layer(x, x), layer(y, y)
+                ctxt_x, ctxt_y = layer(x, x), layer(y, y)
             else:
                 raise Exception("Error, Please specify: cross OR self Attention!")
 
-            x, y = (x + delta_x), (y + delta_y)
+            x, y = fuse_x(torch.cat([x, ctxt_x], dim=1)), fuse_y(torch.cat([y, ctxt_y], dim=1))
 
         return x, y
+
+    # def forward(self, x, y):
+    #     for layer, name in zip(self.layers, self.names):
+    #         if name == 'cross':
+    #             delta_x, delta_y = layer(x, y), layer(y, x)
+    #         elif name == 'self':
+    #             delta_x, delta_y = layer(x, x), layer(y, y)
+    #         else:
+    #             raise Exception("Error, Please specify: cross OR self Attention!")
+    #
+    #         x, y = (x + delta_x), (y + delta_y)
+    #
+    #     return x, y
 
 
 class multiScaleAttention(nn.Module):
@@ -206,6 +244,10 @@ class multiScaleAttention(nn.Module):
         self.attentionLayers = attentionList
 
         shrinkChannel = in_channels[0] * 2
+        # shrinkChannel = in_channels[0]
+        # self.shrinkHW = nn.Sequential(nn.Conv2d(in_channels[0], shrinkChannel, kernel_size=3, stride=2, padding=1, bias=False),
+        #                           nn.BatchNorm2d(shrinkChannel),
+        #                           nn.LeakyReLU(0.2, inplace=True))
         self.shrinkHW = nn.Sequential(nn.Conv2d(in_channels[0], shrinkChannel, kernel_size=3, stride=2, padding=1, bias=False),
                                   nn.BatchNorm2d(shrinkChannel),
                                   nn.LeakyReLU(0.2, inplace=True),

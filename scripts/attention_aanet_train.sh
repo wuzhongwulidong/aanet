@@ -12,7 +12,7 @@ python train.py \
 --max_epoch 64 \
 --milestones 20,30,40,50,60 \
 --data_dir data/SceneFlow \
---checkpoint_dir checkpoints/attention_aanet+_train_sceneflow \
+--checkpoint_dir checkpoints/attention_aanet_train_sceneflow \
 --accumulation_steps 1 \
 --batch_size 4 \
 --val_batch_size 1 \
@@ -20,9 +20,8 @@ python train.py \
 --img_width 576 \
 --val_img_height 576 \
 --val_img_width 960 \
---feature_type ganet \
---feature_pyramid \
---refinement_type hourglass
+--feature_type aanet \
+--feature_pyramid_network \
 
 #python train.py \
 #--mode val \

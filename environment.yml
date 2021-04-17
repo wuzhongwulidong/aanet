@@ -1,4 +1,4 @@
-name: aanet
+name: pytorch12_python37
 channels:
   - pytorch
   - anaconda
@@ -61,7 +61,7 @@ dependencies:
   - numpy-base=1.16.4=py37hde5b4d6_0
   - olefile=0.46=py37_0
   - opencv=3.4.2=py37h6fd60c2_1
-  - openssl=1.1.1=h7b6447c_0
+  #- openssl=1.1.1=h7b6447c_0
   - pcre=8.43=he6710b0_0
   - pillow=6.1.0=py37h34e0f95_0
   - pip=19.2.2=py37_0
