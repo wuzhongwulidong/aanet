@@ -175,7 +175,7 @@ class myFuseBlock_(nn.Module):
         #     nn.BatchNorm2d(out_channels),
         #     nn.LeakyReLU(0.1, inplace=True))
         self.fuse = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 1, 1, 1, bias=True),
+            nn.Conv2d(in_channels, out_channels, 1, 1, 0, bias=True),
             nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(0.1, inplace=True))
 
@@ -193,9 +193,9 @@ class myAttentionBlock(nn.Module):
         self.layers = nn.ModuleList([AttentionBlock_(in_channels, key_channels, value_channels)
                                      for _ in range(len(layer_names))])
 
-        self.fuse_x = nn.ModuleList([myFuseBlock_(in_channels + value_channels, value_channels)
+        self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels + in_channels, value_channels)
                                     for _ in range(len(layer_names))])
-        self.fuse_y = nn.ModuleList([myFuseBlock_(in_channels + value_channels, value_channels)
+        self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels + in_channels, value_channels)
                                     for _ in range(len(layer_names))])
 
     def forward(self, x, y):
