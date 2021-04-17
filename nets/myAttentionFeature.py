@@ -193,9 +193,9 @@ class myAttentionBlock(nn.Module):
         self.layers = nn.ModuleList([AttentionBlock_(in_channels, key_channels, value_channels)
                                      for _ in range(len(layer_names))])
 
-        self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+        self.fuse_x = nn.ModuleList([myFuseBlock_(in_channels + value_channels, value_channels)
                                     for _ in range(len(layer_names))])
-        self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+        self.fuse_y = nn.ModuleList([myFuseBlock_(in_channels + value_channels, value_channels)
                                     for _ in range(len(layer_names))])
 
     def forward(self, x, y):
