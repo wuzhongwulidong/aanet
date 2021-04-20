@@ -321,7 +321,7 @@ class myFuseBlock_(nn.Module):
         #     nn.BatchNorm2d(out_channels),
         #     nn.LeakyReLU(0.1, inplace=True))
         self.fuse = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 1, 1, 1, bias=True),  # TODO：此处可能有pading错误！！！！
+            nn.Conv2d(in_channels, out_channels, 1, 1, 0, bias=True),  # 修正1*1卷积的pading为0.
             nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(0.1, inplace=True))
 
