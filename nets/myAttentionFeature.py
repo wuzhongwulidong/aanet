@@ -313,11 +313,15 @@ class myFuseBlock_(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(myFuseBlock_, self).__init__()
 
+        # self.fuse = nn.Sequential(
+        #     nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True),
+        #     nn.BatchNorm2d(out_channels),
+        #     nn.LeakyReLU(0.1, inplace=True),
+        #     nn.Conv2d(out_channels, out_channels, 1, 1, 1, bias=True),
+        #     nn.BatchNorm2d(out_channels),
+        #     nn.LeakyReLU(0.1, inplace=True))
         self.fuse = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=True),
-            nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(out_channels, out_channels, 1, 1, 1, bias=True),
+            nn.Conv2d(in_channels, out_channels, 1, 1, 1, bias=True),  # TODO：此处可能有pading错误！！！！
             nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(0.1, inplace=True))
 
@@ -335,13 +339,13 @@ class myPAMAttentionBlock(nn.Module):
         self.layers = nn.ModuleList([PAMAttentionBlock_(in_channels, channel_shrink, key_channels, value_channels)
                                      for _ in range(len(layer_names))])
 
-        # self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
-        #                             for _ in range(len(layer_names))])
-        # self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
-        #                             for _ in range(len(layer_names))])
+        self.fuse_x = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+                                    for _ in range(len(layer_names))])
+        self.fuse_y = nn.ModuleList([myFuseBlock_(value_channels * 2, value_channels)
+                                    for _ in range(len(layer_names))])
 
     def forward(self, x, y):
-        for layer, name in zip(self.layers, self.names):
+        for layer, name, fuse_x, fuse_y in zip(self.layers, self.names, self.fuse_x, self.fuse_y):
             if name == 'cross':
                 ctxt_x, ctxt_y = layer(x, y), layer(y, x)
             elif name == 'self':
@@ -349,7 +353,7 @@ class myPAMAttentionBlock(nn.Module):
             else:
                 raise Exception("Error, Please specify: cross OR self Attention!")
 
-            x, y = x + ctxt_x, y + ctxt_y
+            x, y = fuse_x(torch.cat([x, ctxt_x], dim=1)), fuse_y(torch.cat([y, ctxt_y], dim=1))
 
         return x, y
 

@@ -4,9 +4,10 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 import os
 from contextlib import nullcontext
+import numpy as np
 
 from utils import utils
-from utils.visualization import disp_error_img, save_images
+from utils.visualization import disp_error_img, save_images, disp_error_hist, save_hist
 from metric import d1_metric, thres_metric
 
 
@@ -24,7 +25,7 @@ class Model(object):
         self.best_epe = 999. if best_epe is None else best_epe
         self.best_epoch = -1 if best_epoch is None else best_epoch
 
-        if not args.evaluate_only:
+        if not args.evaluate_only or args.mode == 'test':
             self.train_writer = SummaryWriter(os.path.join(self.args.checkpoint_dir, "tensorBoardData"))
 
     def train(self, train_loader, local_master):
@@ -289,8 +290,9 @@ class Model(object):
             val_thres3 += thres3.item()
 
             # Save 3 images for visualization
-            if not args.evaluate_only:
-                if i in [num_samples // 4, num_samples // 2, num_samples // 4 * 3]:
+            if not args.evaluate_only or args.mode == 'test':
+                if i in [0, num_samples // 10, num_samples // 6 * 2, num_samples // 6 * 3, num_samples // 6 * 4,
+                         num_samples // 6 * 5]:
                     img_summary = dict()
                     img_summary['disp_error'] = disp_error_img(pred_disp, gt_disp)
                     img_summary['left'] = left
@@ -298,6 +300,10 @@ class Model(object):
                     img_summary['gt_disp'] = gt_disp
                     img_summary['pred_disp'] = pred_disp
                     save_images(self.train_writer, 'val' + str(val_count), img_summary, self.epoch)
+
+                    disp_error = disp_error_hist(pred_disp, gt_disp, args.max_disp)
+                    save_hist(self.train_writer, '{}/{}'.format('val' + str(val_count), 'hist'), disp_error, self.epoch)
+
                     val_count += 1
         # 遍历验证样本或测试样本完成
 

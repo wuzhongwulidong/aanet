@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-export CUDA_VISIBLE_DEVICES=1
+#export CUDA_VISIBLE_DEVICES=1
 ## Evaluate the best validation model on Scene Flow test set
 #CUDA_VISIBLE_DEVICES=1 python  -m torch.distributed.launch  --nproc_per_node 1 train.py \
 #--mode test \
