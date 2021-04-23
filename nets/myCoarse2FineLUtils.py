@@ -110,6 +110,7 @@ def myDispUpsample(disp, upScale=2):
 
     upDisp = F.interpolate(disp, scale_factor=upScale, mode='bilinear', align_corners=False) * upScale
     # upDisp = F.interpolate(disp, scale_factor=upScale, mode='nearest') * upScale
+    # upDisp = F.interpolate(disp * upScale, scale_factor=upScale, mode='nearest')
 
     return upDisp
 
@@ -159,28 +160,28 @@ class coarse2fine_module(nn.Module):
         # =======================1/8==================
         self.max_disp_8x = self.max_disp // 8   # 192/8 = 24
         self.sCount_8x = self.max_disp_8x // 1 + 1  # 24 + 1
-        self.myDispUpsamRfModule_8x = myDispUpsamRfModule(in_channels=24)
+        self.myDispUpsamRfModule_8x = myDispUpsamRfModule(dila_list=[1, 1])
         self.cost_aggregration_8x = CostAggregation(self.sCount_8x, self.sCount_8x, 2)  # in_c, out_c, hid_c, resblk_num
 
         # =======================1/4==================
         self.max_disp_4x = self.max_disp // 4   # 192/4 = 48
         self.sCount_4x = self.max_disp_4x // 2 + 1  # 24 + 1
-        self.myDispUpsamRfModule_4x = myDispUpsamRfModule(in_channels=24)
+        self.myDispUpsamRfModule_4x = myDispUpsamRfModule(dila_list=[1,2])
         self.cost_aggregration_4x = CostAggregation(self.sCount_4x, self.sCount_4x, 2)  # in_c, out_c, resblk_num
 
         # =======================1/2==================
         self.max_disp_2x = self.max_disp // 2   # 192/2 = 96
         self.sCount_2x = self.max_disp_2x // 4 + 1  # 24 + 1
-        self.myDispUpsamRfModule_2x = myDispUpsamRfModule(in_channels=16)
+        self.myDispUpsamRfModule_2x = myDispUpsamRfModule(dila_list=[1, 2, 4])
         self.cost_aggregration_2x = CostAggregation(self.sCount_2x, self.sCount_2x, 2)  # in_c, out_c, resblk_num
 
         # =======================1/1==================
         self.max_disp_1x = self.max_disp // 1   # 192/1 = 192
         self.sCount_1x = self.max_disp_1x // 16 + 1  # 12 + 1
-        self.myDispUpsamRfModule_1x = myDispUpsamRfModule(in_channels=16)
-        self.cost_aggregration_1x = CostAggregation(self.sCount_1x, self.sCount_1x, 2)  # in_c, out_c, hid_c, resblk_num
+        # self.myDispUpsamRfModule_1x = myDispUpsamRfModule(dila_list=[1, 2, 4, 8, 1])
+        # self.cost_aggregration_1x = CostAggregation(self.sCount_1x, self.sCount_1x, 2)  # in_c, out_c, hid_c, resblk_num
 
-    def forward(self, left_feature_pyramid, right_feature_pyramid):
+    def forward(self, left_feature_pyramid, right_feature_pyramid, left_img, right_img):
         """
         coarse2fine_cost_construction
         :param left_feature_pyramid: # hitnet_feature H：1/16, 1/8, 1/4, 1/2, 1/1。C：32, 24, 24, 16, 16
@@ -199,44 +200,50 @@ class coarse2fine_module(nn.Module):
 
         preDisp_8x = myDispUpsample(disp_16x, upScale=2)
 
-        preDisp_8x = self.myDispUpsamRfModule_8x(preDisp_8x, left_feature_pyramid[1], right_feature_pyramid[1])
+        preDisp_8x = self.myDispUpsamRfModule_8x(preDisp_8x, left_img, right_img)
 
         # =======================1/8==================
         cost_volume_8x, dispCandiates_8x = mySampleCostVolume(preDisp_8x, left_feature_pyramid[1], right_feature_pyramid[1],
                                             self.max_disp_8x, self.sCount_8x)  # [B, sampleCount, H/8, W/8], [B, sampleCount, H/8, W/8]
+        # [B, sampleCount, H/8, W/8], [B, 1, H/8, W/8] -> [B, sampleCount+1, H/8, W/8]
+        # cost_volume_8x = torch.cat([cost_volume_8x, preDisp_8x], dim=1)
+
         cost_volume_8x = self.cost_aggregration_8x(cost_volume_8x)
         disp_8x = myRegressSampledDisp(cost_volume_8x, dispCandiates_8x)
 
         preDisp_4x = myDispUpsample(disp_8x, upScale=2)
-
-        preDisp_4x = self.myDispUpsamRfModule_4x(preDisp_4x, left_feature_pyramid[2], right_feature_pyramid[2])
-
+        preDisp_4x = self.myDispUpsamRfModule_4x(preDisp_4x, left_img, right_img)
         # =======================1/4==================
         cost_volume_4x, dispCandiates_4x = mySampleCostVolume(preDisp_4x, left_feature_pyramid[2], right_feature_pyramid[2],
                                             self.max_disp_4x, self.sCount_4x)  # [B, sampleCount, H/8, W/8], [B, sampleCount, H/8, W/8]
+        # cost_volume_4x = torch.cat([cost_volume_4x, preDisp_4x], dim=1)
+
         cost_volume_4x = self.cost_aggregration_4x(cost_volume_4x)
 
         disp_4x = myRegressSampledDisp(cost_volume_4x, dispCandiates_4x)
 
         preDisp_2x = myDispUpsample(disp_4x, upScale=2)
-
-        preDisp_2x = self.myDispUpsamRfModule_2x(preDisp_2x, left_feature_pyramid[3], right_feature_pyramid[3])
+        preDisp_2x = self.myDispUpsamRfModule_2x(preDisp_2x, left_img, right_img)
 
         # =======================1/2==================
         cost_volume_2x, dispCandiates_2x = mySampleCostVolume(preDisp_2x, left_feature_pyramid[3], right_feature_pyramid[3],
                                             self.max_disp_2x, self.sCount_2x)  # [B, sampleCount, H/8, W/8], [B, sampleCount, H/8, W/8]
+        # cost_volume_2x = torch.cat([cost_volume_2x, preDisp_2x], dim=1)
+
         cost_volume_2x = self.cost_aggregration_2x(cost_volume_2x)
         disp_2x = myRegressSampledDisp(cost_volume_2x, dispCandiates_2x)
 
         preDisp_1x = myDispUpsample(disp_2x, upScale=2)
-
-        preDisp_1x = self.myDispUpsamRfModule_1x(preDisp_1x, left_feature_pyramid[4], right_feature_pyramid[4])
+        # preDisp_1x = self.myDispUpsamRfModule_1x(preDisp_1x, left_img, right_img)
 
         # =======================1/1==================
-        cost_volume_1x, dispCandiates_1x = mySampleCostVolume(preDisp_1x, left_feature_pyramid[4], right_feature_pyramid[4],
-                                            self.max_disp_1x, self.sCount_1x, subPixel=True)  # [B, sampleCount, H/8, W/8], [B, sampleCount, H/8, W/8]
-        cost_volume_1x = self.cost_aggregration_1x(cost_volume_1x)
-        disp_1x = myRegressSampledDisp(cost_volume_1x, dispCandiates_1x)
+        # cost_volume_1x, dispCandiates_1x = mySampleCostVolume(preDisp_1x, left_feature_pyramid[4], right_feature_pyramid[4],
+        #                                     self.max_disp_1x, self.sCount_1x, subPixel=True)  # [B, sampleCount, H/8, W/8], [B, sampleCount, H/8, W/8]
+        # # cost_volume_1x = torch.cat([cost_volume_1x, preDisp_1x], dim=1)
+        #
+        # cost_volume_1x = self.cost_aggregration_1x(cost_volume_1x)
+        # disp_1x = myRegressSampledDisp(cost_volume_1x, dispCandiates_1x)
+        disp_1x = preDisp_1x
 
         disp_16x = disp_16x.squeeze(1)  # [B, H, W]
         disp_8x = disp_8x.squeeze(1)
@@ -248,49 +255,47 @@ class coarse2fine_module(nn.Module):
 
 
 class myDispUpsamRfModule(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, dila_list=[1, 2, 4, 8, 1, 1]):
         super(myDispUpsamRfModule, self).__init__()
 
-        # self.conv1 = conv2d(in_channels * 2, 16)
-        # self.conv2 = conv2d(1, 16)  # on low disparity
-        #
-        # self.dilation_list = [1, 2, 4, 8, 1, 1]
-        # self.dilated_blocks = nn.ModuleList()
-        #
-        # for dilation in self.dilation_list:
-        #     self.dilated_blocks.append(BasicBlock(32, 32, stride=1, dilation=dilation))
-        #
-        # self.dilated_blocks = nn.Sequential(*self.dilated_blocks)
-        #
-        # self.final_conv = nn.Conv2d(32, 1, 3, 1, 1)
+        in_channels = 6
+        self.conv1 = conv2d(in_channels, 16)
+        self.conv2 = conv2d(1, 16)  # on low disparity
 
-    def forward(self, low_disp, left_img, right_img):
-        # assert low_disp.dim() == 3
-        # low_disp = low_disp.unsqueeze(1)  # [B, 1, H, W]
-        # scale_factor = left_img.size(-1) / low_disp.size(-1)
-        # if scale_factor == 1.0:
-        #     disp = low_disp
-        # else:
-        #     disp = F.interpolate(low_disp, size=left_img.size()[-2:], mode='bilinear', align_corners=False)
-        #     disp = disp * scale_factor
-        #
-        # # Warp right image to left view with current disparity
-        # warped_right = disp_warp(right_img, disp)  # [B, C, H, W]
-        # error = warped_right - left_img  # [B, C, H, W]
-        #
-        # concat1 = torch.cat((error, left_img), dim=1)  # [B, 6, H, W]
-        #
-        # conv1 = self.conv1(concat1)  # [B, 16, H, W]
-        # conv2 = self.conv2(disp)  # [B, 16, H, W]
-        # concat2 = torch.cat((conv1, conv2), dim=1)  # [B, 32, H, W]
-        #
-        # out = self.dilated_blocks(concat2)  # [B, 32, H, W]
-        # residual_disp = self.final_conv(out)  # [B, 1, H, W]
-        #
-        # disp = F.relu(disp + residual_disp, inplace=True)  # [B, 1, H, W]
-        # disp = disp.squeeze(1)  # [B, H, W]
+        self.dilation_list = dila_list
+        self.dilated_blocks = nn.ModuleList()
 
-        return low_disp
+        for dilation in self.dilation_list:
+            self.dilated_blocks.append(BasicBlock(32, 32, stride=1, dilation=dilation))
+
+        self.dilated_blocks = nn.Sequential(*self.dilated_blocks)
+
+        self.final_conv = nn.Conv2d(32, 1, 3, 1, 1)
+
+    def forward(self, disp, left_img, right_img):
+        assert disp.dim() == 4  # [B, 1, H, W]
+        scale_factor = disp.size(-1) / left_img.size(-1)
+        if scale_factor != 1.0:
+            # 降低图像尺寸
+            left_img = F.interpolate(left_img, scale_factor=scale_factor, mode='bilinear', align_corners=False)
+            right_img = F.interpolate(right_img, scale_factor=scale_factor, mode='bilinear', align_corners=False)
+
+        # Warp right image to left view with current disparity
+        warped_right = disp_warp(right_img, disp)  # [B, C, H, W]
+        error = warped_right - left_img  # [B, C, H, W]
+
+        concat1 = torch.cat((error, left_img), dim=1)  # [B, 6, H, W]
+
+        conv1 = self.conv1(concat1)  # [B, 16, H, W]
+        conv2 = self.conv2(disp)  # [B, 16, H, W]
+        concat2 = torch.cat((conv1, conv2), dim=1)  # [B, 32, H, W]
+
+        out = self.dilated_blocks(concat2)  # [B, 32, H, W]
+        residual_disp = self.final_conv(out)  # [B, 1, H, W]
+
+        disp = F.relu(disp + residual_disp, inplace=True)  # [B, 1, H, W]
+
+        return disp
 
 
 class CostVolume(nn.Module):

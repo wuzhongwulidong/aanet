@@ -10,6 +10,46 @@ from utils.visualization import disp_error_img, save_images
 from metric import d1_metric, thres_metric
 
 
+def gtDownSampleLoss(pred_disp_pyramid, pyramid_weight, gt_disp, args):
+    disp_loss = 0
+    pseudo_disp_loss = 0
+    pyramid_loss = []
+    pseudo_pyramid_loss = []
+
+    # if args.load_pseudo_gt:
+    #     pseudo_gt_disp = sample['pseudo_disp'].to(device)
+    #     pseudo_mask = (pseudo_gt_disp > 0) & (pseudo_gt_disp < args.max_disp) & (~mask)  # inverse mask # 需要修补的像素位置的mask
+    for k in range(len(pred_disp_pyramid)):
+        pred_disp = pred_disp_pyramid[k]
+        weight = pyramid_weight[k]
+
+        curr_gt = gt_disp  # 最后乘上这一项是必须的。因为图像尺寸变化，视差要相应变化。
+        curr_max_disp = args.max_disp
+        mask = (curr_gt > 0) & (curr_gt < curr_max_disp)
+        if pred_disp.size(-1) != gt_disp.size(-1):
+            scale = gt_disp.size(-1) // pred_disp.size(-1)
+            # gt_disp: [B, H, W] -> [B, 1, H, W]
+            curr_gt = F.max_pool2d(gt_disp.unsqueeze(1), kernel_size=scale, stride=scale) / scale  # 最后乘上这一项是必须的。因为图像尺寸变化，视差要相应变化。
+            curr_gt = curr_gt.squeeze(1)
+            curr_max_disp = args.max_disp / scale
+            mask = (curr_gt > 0) & (curr_gt < curr_max_disp)
+
+        curr_loss = F.smooth_l1_loss(pred_disp[mask], curr_gt[mask], reduction='mean')
+
+        disp_loss += weight * curr_loss
+        pyramid_loss.append(curr_loss)
+
+        # # Pseudo gt loss
+        # if args.load_pseudo_gt:
+        #     pseudo_curr_loss = F.smooth_l1_loss(pred_disp[pseudo_mask], pseudo_gt_disp[pseudo_mask],
+        #                                         reduction='mean')
+        #     pseudo_disp_loss += weight * pseudo_curr_loss
+        #
+        #     pseudo_pyramid_loss.append(pseudo_curr_loss)
+
+    return disp_loss, pyramid_loss, pseudo_disp_loss, pseudo_pyramid_loss
+
+
 class Model(object):
     def __init__(self, args, logger, optimizer, aanet, device, start_iter=0, start_epoch=0,
                  best_epe=None, best_epoch=None):
@@ -85,7 +125,11 @@ class Model(object):
                 if len(pred_disp_pyramid) == 5 and args.feature_type == 'aanet':
                     pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0, 1.0]  # AANet and AANet+
                 elif len(pred_disp_pyramid) == 7 and args.feature_type == 'hitnet_feature':
+                    # disp_16x, disp_8x, disp_4x, disp_2x, disp_1x, refined_2x, refined_1x
                     pyramid_weight = [1 / 3, 2 / 3, 3 / 4, 1.0, 1.0, 1.0, 1.0]  # my coarse2fine_module hitnet
+                    # pyramid_weight = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]  # my coarse2fine_module hitnet
+                    # disp_16x, disp_8x, disp_4x, disp_2x, disp_1x, refined_1x
+                    # pyramid_weight = [1 / 4, 2 / 4, 2 / 4, 1.0, 1.0, 1.0]  # my coarse2fine_module hitnet
                 elif len(pred_disp_pyramid) == 4:
                     pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0]
                 elif len(pred_disp_pyramid) == 3:
@@ -118,6 +162,9 @@ class Model(object):
                         pseudo_disp_loss += weight * pseudo_curr_loss
 
                         pseudo_pyramid_loss.append(pseudo_curr_loss)
+
+                # disp_loss, pyramid_loss, pseudo_disp_loss, pseudo_pyramid_loss\
+                #     = gtDownSampleLoss(pred_disp_pyramid, pyramid_weight, gt_disp, args)
 
                 total_loss = disp_loss + pseudo_disp_loss
 
@@ -178,7 +225,7 @@ class Model(object):
 
                     # Save loss of different scale
                     for s in range(len(pyramid_loss)):
-                        save_name = 'train/loss' + str(len(pyramid_loss) - s - 1)  # loss0-->loss4：低分辨率~高分辨率
+                        save_name = 'train/loss' + str(len(pyramid_loss) - s - 1)  # loss0-->loss4：高分辨率~低分辨率
                         save_value = pyramid_loss[s]
                         self.train_writer.add_scalar(save_name, save_value, self.num_iter)
 
@@ -330,7 +377,7 @@ class Model(object):
             f.write('d1: %.4f\t' % mean_d1)
             f.write('thres1: %.4f\t' % mean_thres1)
             f.write('thres2: %.4f\t' % mean_thres2)
-            f.write('thres3: %.4f\n' % mean_thres3)
+            f.write('thres3: %.4f\t' % mean_thres3)
             f.write('thres10: %.4f\t' % mean_thres10)
             f.write('thres20: %.4f\n' % mean_thres20)
             f.write('dataset_name= %s\t mode=%s\n' % (args.dataset_name, args.mode))

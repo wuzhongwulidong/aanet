@@ -107,7 +107,7 @@ if args.debug_overFit_train in [0, 2]:
     args.summary_freq = 100
 elif args.debug_overFit_train in [1]:
     args.print_freq = 10
-    args.summary_freq = 50
+    args.summary_freq = 100
 
 if args.distributed:
     #  尝试分布式训练

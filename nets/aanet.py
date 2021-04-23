@@ -243,12 +243,12 @@ class AANet(nn.Module):
         return disparity_pyramid
 
     def forward(self, left_img, right_img):
-        left_feature = self.feature_extraction(
-            left_img)  # hitnet_feature H：1/16, 1/8, 1/4, 1/2, 1/1。C：32, 24, 24, 16, 16
+        # hitnet_feature H：1/16, 1/8, 1/4, 1/2, 1/1。C：32, 24, 24, 16, 16
+        left_feature = self.feature_extraction(left_img)
         right_feature = self.feature_extraction(right_img)
 
         # disp_16x, disp_8x, disp_4x, disp_2x, disp_1x: 1/16, 1/8, 1/4, 1/2, 1/1   [B, 1, H, W]
-        disps = self.coarse2fine_module(left_feature, right_feature)
+        disps = self.coarse2fine_module(left_feature, right_feature, left_img, right_img)
 
         refined_disps = self.myDisparity_refinement(left_img, right_img, *disps)
 
