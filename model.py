@@ -4,9 +4,10 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 import os
 from contextlib import nullcontext
-
+import scipy.io
 from utils import utils
-from utils.visualization import disp_error_img, save_images
+from utils.utilsForMatlab import saveImgErrorAnalysis
+from utils.visualization import disp_error_img, save_images, disp_error_hist, save_hist
 from metric import d1_metric, thres_metric
 
 
@@ -24,14 +25,14 @@ class Model(object):
         self.best_epe = 999. if best_epe is None else best_epe
         self.best_epoch = -1 if best_epoch is None else best_epoch
 
-        if not args.evaluate_only:
-            self.train_writer = SummaryWriter(self.args.checkpoint_dir)
+        if not args.evaluate_only or args.mode == 'test':
+            self.train_writer = SummaryWriter(os.path.join(self.args.checkpoint_dir, "tensorBoardData"))
 
-    def train(self, train_loader, local_master):
+    def train(self, train_loader, local_master, trainLoss_dict, trainLossKey):
         args = self.args
         logger = self.logger
 
-        steps_per_epoch = len(train_loader) / args.accumulation_steps # len(train_loader)返回的是Batch的个数
+        steps_per_epoch = len(train_loader) / args.accumulation_steps  # len(train_loader)返回的是Batch的个数
         device = self.device
 
         self.aanet.train()  # 设置模型为训练模式！
@@ -42,16 +43,26 @@ class Model(object):
                 if classname.find('BatchNorm') != -1:
                     m.eval()
 
-            self.aanet.apply(set_bn_eval)  # apply(fn: Callable[Module, None])：Applies fn recursively to every submodule (as returned by .children()) as well as self. Typical use includes initializing the parameters of a model (see also torch.nn.init).
+            self.aanet.apply(
+                set_bn_eval)  # apply(fn: Callable[Module, None])：Applies fn recursively to every submodule (as returned by .children()) as well as self. Typical use includes initializing the parameters of a model (see also torch.nn.init).
 
         # Learning rate summary
         base_lr = self.optimizer.param_groups[0]['lr']
         offset_lr = self.optimizer.param_groups[1]['lr']
-        self.train_writer.add_scalar('base_lr', base_lr, self.epoch + 1)
-        self.train_writer.add_scalar('offset_lr', offset_lr, self.epoch + 1)
+        self.train_writer.add_scalar('lr/base_lr', base_lr, self.epoch + 1)
+        self.train_writer.add_scalar('lr/offset_lr', offset_lr, self.epoch + 1)
 
         last_print_time = time.time()
 
+        validate_count = 0
+        total_epe = 0
+        total_d1 = 0
+        total_thres1 = 0
+        total_thres2 = 0
+        total_thres3 = 0
+        total_thres10 = 0
+        total_thres20 = 0
+        loss_acum = 0
         for i, sample in enumerate(train_loader):
             left = sample['left'].to(device)  # [B, 3, H, W]
             right = sample['right'].to(device)
@@ -61,7 +72,8 @@ class Model(object):
 
             if args.load_pseudo_gt:
                 pseudo_gt_disp = sample['pseudo_disp'].to(device)
-                pseudo_mask = (pseudo_gt_disp > 0) & (pseudo_gt_disp < args.max_disp) & (~mask)  # inverse mask # 需要修补的像素位置的mask
+                pseudo_mask = (pseudo_gt_disp > 0) & (pseudo_gt_disp < args.max_disp) & (
+                    ~mask)  # inverse mask # 需要修补的像素位置的mask
 
             if not mask.any():  # np.array.any()是或操作，任意一个元素为True，输出为True。
                 continue
@@ -69,7 +81,8 @@ class Model(object):
             # 尝试分布式训练
             # 只在DDP模式下，轮数不是args.accumulation_steps整数倍的时候使用no_sync。
             # 博客：https://blog.csdn.net/a40850273/article/details/111829836
-            my_context = self.aanet.no_sync if args.distributed and (i + 1) % args.accumulation_steps != 0 else nullcontext
+            my_context = self.aanet.no_sync if args.distributed and (
+                        i + 1) % args.accumulation_steps != 0 else nullcontext
             with my_context():
                 pred_disp_pyramid = self.aanet(left, right)  # list of H/12, H/6, H/3, H/2, H
 
@@ -101,7 +114,8 @@ class Model(object):
                     if pred_disp.size(-1) != gt_disp.size(-1):
                         pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
                         pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
-                                                  mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))  # 最后乘上这一项是必须的。因为图像放大，视差要相应增大。
+                                                  mode='bilinear', align_corners=False) * (
+                                                gt_disp.size(-1) / pred_disp.size(-1))  # 最后乘上这一项是必须的。因为图像放大，视差要相应增大。
                         pred_disp = pred_disp.squeeze(1)  # [B, H, W]
 
                     curr_loss = F.smooth_l1_loss(pred_disp[mask], gt_disp[mask],
@@ -122,6 +136,18 @@ class Model(object):
                 total_loss /= args.accumulation_steps
                 total_loss.backward()
 
+                # 仅用于记录和分析数据
+                with torch.no_grad():
+                    validate_count += 1
+                    total_epe += F.l1_loss(gt_disp[mask], pred_disp_pyramid[-1][mask], reduction='mean').detach().cpu().numpy()
+                    total_d1 += d1_metric(pred_disp_pyramid[-1], gt_disp, mask).detach().cpu().numpy()
+                    total_thres1 += thres_metric(pred_disp_pyramid[-1], gt_disp, mask, 1.0).detach().cpu().numpy()  # mask.shape=[B, H, W]
+                    total_thres2 += thres_metric(pred_disp_pyramid[-1], gt_disp, mask, 2.0).detach().cpu().numpy()
+                    total_thres3 += thres_metric(pred_disp_pyramid[-1], gt_disp, mask, 3.0).detach().cpu().numpy()
+                    total_thres10 += thres_metric(pred_disp_pyramid[-1], gt_disp, mask, 10.0).detach().cpu().numpy()
+                    total_thres20 += thres_metric(pred_disp_pyramid[-1], gt_disp, mask, 20.0).detach().cpu().numpy()
+                    loss_acum += total_loss.detach().cpu().numpy()
+
             if (i + 1) % args.accumulation_steps == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -136,14 +162,15 @@ class Model(object):
                                      this_cycle / 3600.0  # 还有多久才能完成训练。单位：小时
 
                     logger.info('Epoch: [%3d/%3d] [%5d/%5d] time: %4.2fs remainT: %4.2fh disp_loss: %.3f' %
-                                (self.epoch + 1, args.max_epoch, self.num_iter, steps_per_epoch, this_cycle,time_to_finish,
+                                (self.epoch + 1, args.max_epoch, self.num_iter, steps_per_epoch, this_cycle,
+                                 time_to_finish,
                                  disp_loss.item()))
                     # self.num_iter：表示当前一共进行了多少次迭代，一次参数更新表示一次迭代。
                     # steps_per_epoch：表示一个epoch中有多少次迭代，一次参数更新表示一次迭代。
 
                 if self.num_iter % args.summary_freq == 0:
                     img_summary = dict()
-                    img_summary['left'] = left    # [B, C=3, H, W]
+                    img_summary['left'] = left  # [B, C=3, H, W]
                     img_summary['right'] = right  # [B, C=3, H, W]
                     img_summary['gt_disp'] = gt_disp  # [B, H, W]
 
@@ -153,7 +180,8 @@ class Model(object):
                     # Save pyramid disparity prediction
                     for s in range(len(pred_disp_pyramid)):
                         # Scale from low to high, reverse
-                        save_name = 'pred_disp' + str(len(pred_disp_pyramid) - s - 1)  # pred_disp0-->pred_disp4：高分辨率->低分辨率
+                        save_name = 'pred_disp' + str(
+                            len(pred_disp_pyramid) - s - 1)  # pred_disp0-->pred_disp4：高分辨率->低分辨率
                         save_value = pred_disp_pyramid[s]
                         img_summary[save_name] = save_value
 
@@ -162,7 +190,8 @@ class Model(object):
                     if pred_disp.size(-1) != gt_disp.size(-1):
                         pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
                         pred_disp = F.interpolate(pred_disp, size=(gt_disp.size(-2), gt_disp.size(-1)),
-                                                  mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))
+                                                  mode='bilinear', align_corners=False) * (
+                                                gt_disp.size(-1) / pred_disp.size(-1))
                         pred_disp = pred_disp.squeeze(1)  # [B, H, W]
                     img_summary['disp_error'] = disp_error_img(pred_disp, gt_disp)  # [B, C=3, H, W]
 
@@ -180,16 +209,31 @@ class Model(object):
                         save_value = pyramid_loss[s]
                         self.train_writer.add_scalar(save_name, save_value, self.num_iter)
 
-                    d1 = d1_metric(pred_disp, gt_disp, mask)   # pred_disp.shape=[B, H, W], gt_disp.shape=[B, H, W]
+                    d1 = d1_metric(pred_disp, gt_disp, mask)  # pred_disp.shape=[B, H, W], gt_disp.shape=[B, H, W]
                     self.train_writer.add_scalar('train/d1', d1.item(), self.num_iter)
                     thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)  # mask.shape=[B, H, W]
                     thres2 = thres_metric(pred_disp, gt_disp, mask, 2.0)
                     thres3 = thres_metric(pred_disp, gt_disp, mask, 3.0)
+                    thres10 = thres_metric(pred_disp, gt_disp, mask, 10.0)
+                    thres20 = thres_metric(pred_disp, gt_disp, mask, 20.0)
                     self.train_writer.add_scalar('train/thres1', thres1.item(), self.num_iter)
                     self.train_writer.add_scalar('train/thres2', thres2.item(), self.num_iter)
                     self.train_writer.add_scalar('train/thres3', thres3.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/thres10', thres10.item(), self.num_iter)
+                    self.train_writer.add_scalar('train/thres20', thres20.item(), self.num_iter)
 
         self.epoch += 1
+
+        # 记录数据为matlab的mat文件，用于分析和对比
+        trainLoss_dict[trainLossKey]['epochs'].append(self.epoch)
+        trainLoss_dict[trainLossKey]['avgEPE'].append(total_epe / validate_count)
+        trainLoss_dict[trainLossKey]['avg_d1'].append(total_d1 / validate_count)
+        trainLoss_dict[trainLossKey]['avg_thres1'].append(total_thres1 / validate_count)
+        trainLoss_dict[trainLossKey]['avg_thres2'].append(total_thres2 / validate_count)
+        trainLoss_dict[trainLossKey]['avg_thres3'].append(total_thres3 / validate_count)
+        trainLoss_dict[trainLossKey]['avg_thres10'].append(total_thres10 / validate_count)
+        trainLoss_dict[trainLossKey]['avg_thres20'].append(total_thres20 / validate_count)
+        trainLoss_dict[trainLossKey]['avg_loss'].append(loss_acum / validate_count)
 
         # 一个epoch结束：
         # args.no_validate=False,则后面不会做self.validate()，故需要在此处记录如下信息。
@@ -215,7 +259,7 @@ class Model(object):
                                       best_epoch=self.best_epoch,
                                       save_optimizer=False) if local_master else None
 
-    def validate(self, val_loader, local_master):
+    def validate(self, val_loader, local_master, valLossDict, valLossKey):
         args = self.args
         logger = self.logger
         logger.info('=> Start validation...')
@@ -242,6 +286,8 @@ class Model(object):
         val_thres1 = 0
         val_thres2 = 0
         val_thres3 = 0
+        val_thres10 = 0
+        val_thres20 = 0
 
         val_count = 0
 
@@ -252,7 +298,7 @@ class Model(object):
 
         # 遍历验证样本或测试样本
         for i, sample in enumerate(val_loader):
-            if (i+1) % 100 == 0:
+            if (i + 1) % 100 == 0:
                 logger.info('=> Validating %d/%d' % (i, num_samples))
 
             left = sample['left'].to(self.device)  # [B, 3, H, W]
@@ -268,12 +314,14 @@ class Model(object):
             num_imgs += gt_disp.size(0)
 
             with torch.no_grad():
-                pred_disp = self.aanet(left, right)[-1]  # [B, H, W]
+                disparity_pyramid = self.aanet(left, right)  # [B, H, W]
+                pred_disp = disparity_pyramid[-1]
 
             if pred_disp.size(-1) < gt_disp.size(-1):
                 pred_disp = pred_disp.unsqueeze(1)  # [B, 1, H, W]
                 pred_disp = F.interpolate(pred_disp, (gt_disp.size(-2), gt_disp.size(-1)),
-                                          mode='bilinear', align_corners=False) * (gt_disp.size(-1) / pred_disp.size(-1))
+                                          mode='bilinear', align_corners=False) * (
+                                        gt_disp.size(-1) / pred_disp.size(-1))
                 pred_disp = pred_disp.squeeze(1)  # [B, H, W]
 
             epe = F.l1_loss(gt_disp[mask], pred_disp[mask], reduction='mean')
@@ -281,16 +329,28 @@ class Model(object):
             thres1 = thres_metric(pred_disp, gt_disp, mask, 1.0)
             thres2 = thres_metric(pred_disp, gt_disp, mask, 2.0)
             thres3 = thres_metric(pred_disp, gt_disp, mask, 3.0)
+            thres10 = thres_metric(pred_disp, gt_disp, mask, 10.0)
+            thres20 = thres_metric(pred_disp, gt_disp, mask, 20.0)
 
             val_epe += epe.item()
             val_d1 += d1.item()
             val_thres1 += thres1.item()
             val_thres2 += thres2.item()
             val_thres3 += thres3.item()
+            val_thres10 += thres10.item()
+            val_thres20 += thres20.item()
+
+            # save Image For Error Analysis
+            # saveForErrorAnalysis(index, img_name, dstPath, dstName, left, right, gt_disp, disparity_pyramid):
+            with torch.no_grad():
+                saveImgErrorAnalysis(i, sample['left_name'], './myDataAnalysis', 'SceneFlow_valIdx_{}'.format(i),
+                                     left, right, gt_disp, disparity_pyramid, disp_error_img(pred_disp, gt_disp))
 
             # Save 3 images for visualization
-            if not args.evaluate_only:
-                if i in [num_samples // 4, num_samples // 2, num_samples // 4 * 3]:
+            if not args.evaluate_only or args.mode == 'test':
+                # if i in [num_samples // 4, num_samples // 2, num_samples // 4 * 3]:
+                if i in [num_samples // 6, num_samples // 6 * 2, num_samples // 6 * 3, num_samples // 6 * 4,
+                         num_samples // 6 * 5]:
                     img_summary = dict()
                     img_summary['disp_error'] = disp_error_img(pred_disp, gt_disp)
                     img_summary['left'] = left
@@ -298,6 +358,10 @@ class Model(object):
                     img_summary['gt_disp'] = gt_disp
                     img_summary['pred_disp'] = pred_disp
                     save_images(self.train_writer, 'val' + str(val_count), img_summary, self.epoch)
+
+                    disp_error = disp_error_hist(pred_disp, gt_disp, args.max_disp)
+                    save_hist(self.train_writer, '{}/{}'.format('val' + str(val_count), 'hist'), disp_error, self.epoch)
+
                     val_count += 1
         # 遍历验证样本或测试样本完成
 
@@ -308,6 +372,18 @@ class Model(object):
         mean_thres1 = val_thres1 / valid_samples
         mean_thres2 = val_thres2 / valid_samples
         mean_thres3 = val_thres3 / valid_samples
+        mean_thres10 = val_thres10 / valid_samples
+        mean_thres20 = val_thres20 / valid_samples
+
+        # 记录数据为matlab的mat文件，用于分析和对比
+        valLossDict[valLossKey]["epochs"].append(self.epoch)
+        valLossDict[valLossKey]["avgEPE"].append(mean_epe)
+        valLossDict[valLossKey]["avg_d1"].append(mean_d1)
+        valLossDict[valLossKey]["avg_thres1"].append(mean_thres1)
+        valLossDict[valLossKey]["avg_thres2"].append(mean_thres2)
+        valLossDict[valLossKey]["avg_thres3"].append(mean_thres3)
+        valLossDict[valLossKey]["avg_thres10"].append(mean_thres10)
+        valLossDict[valLossKey]["avg_thres20"].append(mean_thres20)
 
         # Save validation results
         with open(val_file, 'a') as f:
@@ -316,7 +392,9 @@ class Model(object):
             f.write('d1: %.4f\t' % mean_d1)
             f.write('thres1: %.4f\t' % mean_thres1)
             f.write('thres2: %.4f\t' % mean_thres2)
-            f.write('thres3: %.4f\n' % mean_thres3)
+            f.write('thres3: %.4f\t' % mean_thres3)
+            f.write('thres10: %.4f\t' % mean_thres10)
+            f.write('thres20: %.4f\n' % mean_thres20)
             f.write('dataset_name= %s\t mode=%s\n' % (args.dataset_name, args.mode))
 
         logger.info('=> Mean validation epe of epoch %d: %.3f' % (self.epoch, mean_epe))
@@ -327,6 +405,8 @@ class Model(object):
             self.train_writer.add_scalar('val/thres1', mean_thres1, self.epoch)
             self.train_writer.add_scalar('val/thres2', mean_thres2, self.epoch)
             self.train_writer.add_scalar('val/thres3', mean_thres3, self.epoch)
+            self.train_writer.add_scalar('val/thres10', mean_thres10, self.epoch)
+            self.train_writer.add_scalar('val/thres20', mean_thres20, self.epoch)
 
         if not args.evaluate_only:
             if args.val_metric == 'd1':

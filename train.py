@@ -10,16 +10,20 @@ import os
 import nets
 import dataloader
 from dataloader import transforms
+from dataloader.dataloader import getDataLoader
 from utils import utils
 import model
+from utils.utilsForMatlab import getLossRecord, save_loss_for_matlab
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--mode', default='test', type=str,
+parser.add_argument('--mode', default='val', type=str,
                     help='Validation mode on small subset or test mode on full test data')
+# 用于选择数据集：0: debug; 1: overFit; 2: Train
+parser.add_argument('--debug_overFit_train', default=1, type=int, help='For code debug only!')
 
 # Training data
 parser.add_argument('--data_dir', default='data/SceneFlow', type=str, help='Training dataset')
@@ -47,6 +51,7 @@ parser.add_argument('--max_epoch', default=64, type=int, help='Maximum epoch num
 parser.add_argument('--resume', action='store_true', help='Resume training from latest checkpoint')
 
 # AANet
+parser.add_argument('--useFeatureAtt', default=1, type=int, help='Whether to use Feature Attention: 1:use; 0:dont use')
 parser.add_argument('--feature_type', default='aanet', type=str, help='Type of feature extractor')
 parser.add_argument('--no_feature_mdconv', action='store_true', help='Whether to use mdconv for feature extraction')
 parser.add_argument('--feature_pyramid', action='store_true', help='Use pyramid feature')
@@ -94,7 +99,16 @@ parser.add_argument("--local_rank", type=int)  # 必须有这一句，但是loca
 parser.add_argument("--distributed", action='store_true', help="use DistributedDataParallel")
 
 args = parser.parse_args()
-logger = utils.get_logger()
+utils.check_path(args.checkpoint_dir)
+logger = utils.get_logger(os.path.join(args.checkpoint_dir, "trainLog.txt"))
+
+# 调整打印频率
+if args.debug_overFit_train in [0, 2]:
+    args.print_freq = 50
+    args.summary_freq = 100
+elif args.debug_overFit_train in [1]:
+    args.print_freq = 10
+    args.summary_freq = 50
 
 if args.distributed:
     #  尝试分布式训练
@@ -112,6 +126,7 @@ else:
 
 # 尝试分布式训练
 local_master = True if not args.distributed else args.local_rank == 0
+utils.save_args(args) if local_master else None
 
 # 打印所用的参数
 if local_master:
@@ -132,53 +147,7 @@ def main():
     torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # Train loader
-    train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
-                            transforms.RandomColor(),
-                            transforms.RandomVerticalFlip(),
-                            transforms.ToTensor(),  # 将图像数据转化为Tensor并除以255.0，将像素数值范围归一化到[0,1]之间且[H, W, C=3]->[C=3, H, W]
-                            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)  # 使用ImageNet数据集的均值和方差再做归一化
-                            ]
-    train_transform = transforms.Compose(train_transform_list)
-
-    train_data = dataloader.StereoDataset(data_dir=args.data_dir,
-                                          dataset_name=args.dataset_name,
-                                          mode='train' if args.mode != 'train_all' else 'train_all',
-                                          load_pseudo_gt=args.load_pseudo_gt,
-                                          transform=train_transform)
-
-    logger.info('=> {} training samples found in the training set'.format(len(train_data)))
-    #  尝试分布式训练
-    # 注意DistributedSampler默认参数就进行了shuffle
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data) if args.distributed else None
-
-    # train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True,
-    #                           num_workers=args.num_workers, pin_memory=True, drop_last=True,
-    #                           sampler=train_sampler)
-    #  尝试分布式训练
-    is_shuffle = False if args.distributed else True
-    # 需要注意的是，这里的batch_size指的是每个进程下的batch_size。也就是说，总batch_size是这里的batch_size再乘以并行数(world_size)。
-    train_loader = DataLoader(dataset=train_data,
-                              batch_size=args.batch_size,
-                              num_workers=args.num_workers,
-                              shuffle=is_shuffle,
-                              pin_memory=True,
-                              drop_last=True,
-                              sampler=train_sampler)
-
-    # Validation loader
-    val_transform_list = [transforms.RandomCrop(args.val_img_height, args.val_img_width, validate=True),
-                          transforms.ToTensor(),
-                          transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)]
-
-    val_transform = transforms.Compose(val_transform_list)
-    val_data = dataloader.StereoDataset(data_dir=args.data_dir,
-                                        dataset_name=args.dataset_name,
-                                        mode=args.mode,
-                                        transform=val_transform)
-
-    val_loader = DataLoader(dataset=val_data, batch_size=args.val_batch_size, shuffle=False,
-                            num_workers=args.num_workers, pin_memory=True, drop_last=False)
+    train_loader, val_loader = getDataLoader(args, logger)
 
     # Network
     aanet = nets.AANet(args.max_disp,
@@ -189,6 +158,7 @@ def main():
                        feature_pyramid_network=args.feature_pyramid_network,
                        feature_similarity=args.feature_similarity,
                        aggregation_type=args.aggregation_type,
+                       useFeatureAtt=args.useFeatureAtt,
                        num_scales=args.num_scales,
                        num_fusions=args.num_fusions,
                        num_stage_blocks=args.num_stage_blocks,
@@ -198,7 +168,11 @@ def main():
                        mdconv_dilation=args.mdconv_dilation,
                        deformable_groups=args.deformable_groups).to(device)
 
-    logger.info('%s' % aanet) if local_master else None
+    # logger.info('%s' % aanet) if local_master else None
+    if local_master:
+        structure_of_net = os.path.join(args.checkpoint_dir, 'structure_of_net.txt')
+        with open(structure_of_net, 'w') as f:
+            f.write('%s' % aanet)
 
     if args.pretrained_aanet is not None:
         logger.info('=> Loading pretrained AANet: %s' % args.pretrained_aanet)
@@ -270,9 +244,13 @@ def main():
 
     logger.info('=> Start training...')
 
+    trainLoss_dict, trainLossKey, valLoss_dict, valLossKey = getLossRecord(netName="AANet")
+
     if args.evaluate_only:
         assert args.val_batch_size == 1
-        train_model.validate(val_loader, local_master)  # test模式。应该设置--evaluate_only，且--mode为“test”。
+        train_model.validate(val_loader, local_master, valLoss_dict, valLossKey)  # test模式。应该设置--evaluate_only，且--mode为“test”。
+        # 保存Loss用于分析
+        save_loss_for_matlab(trainLoss_dict, valLoss_dict)
     else:
         for epoch in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
             if not args.evaluate_only:
@@ -281,11 +259,14 @@ def main():
                 if args.distributed:
                     train_loader.sampler.set_epoch(epoch)
                     logger.info('train_loader.sampler.set_epoch({})'.format(epoch))
-                train_model.train(train_loader, local_master)
+                train_model.train(train_loader, local_master, trainLoss_dict, trainLossKey)
             if not args.no_validate:
-                train_model.validate(val_loader, local_master)  # 训练模式下：边训练边验证。
+                train_model.validate(val_loader, local_master, valLoss_dict, valLossKey)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
                 lr_scheduler.step()  # 调整Learning Rate
+
+            # 保存Loss用于分析。每个epoch结束后，都保存一次，覆盖之前的保存。避免必须训练完成才保存的弊端。
+            save_loss_for_matlab(trainLoss_dict, valLoss_dict)
 
         logger.info('=> End training\n\n')
 

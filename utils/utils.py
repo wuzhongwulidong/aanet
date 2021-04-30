@@ -179,3 +179,21 @@ def get_logger():
     handler.setFormatter(logging.Formatter(fmt))
     logger.addHandler(handler)
     return logger
+
+
+def get_logger(logFilePath):
+    logger_name = "main-logger"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+
+    streamHandler = logging.StreamHandler()
+    FileHandler = logging.FileHandler(logFilePath)
+
+    # fmt = "[%(asctime)s %(levelname)s %(filename)s line %(lineno)d %(process)d] %(message)s"
+    fmt = "[%(asctime)s] %(message)s"
+    streamHandler.setFormatter(logging.Formatter(fmt))
+    FileHandler.setFormatter(logging.Formatter(fmt))
+
+    logger.addHandler(streamHandler)
+    logger.addHandler(FileHandler)
+    return logger

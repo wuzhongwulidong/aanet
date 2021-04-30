@@ -13,6 +13,7 @@ from nets.refinement import StereoNetRefinement, StereoDRNetRefinement, Hourglas
 
 class AANet(nn.Module):
     def __init__(self, max_disp,
+                 useFeatureAtt,
                  num_downsample=2,
                  feature_type='aanet',
                  no_feature_mdconv=False,
@@ -218,4 +219,11 @@ class AANet(nn.Module):
         disparity_pyramid = self.disparity_computation(aggregation)  # D/12, D/6, D/3
         disparity_pyramid += self.disparity_refinement(left_img, right_img,
                                                        disparity_pyramid[-1])
+
+        # disparity_pyramid.append(F.interpolate(disparity_pyramid[-1].unsqueeze(1), scale_factor=1.5,
+        #                                    mode='bilinear', align_corners=False).squeeze(1))
+        # disparity_pyramid.append(F.interpolate(disparity_pyramid[-2].unsqueeze(1), scale_factor=3,
+        #                                    mode='bilinear', align_corners=False).squeeze(1))
+
+
         return disparity_pyramid

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-export CUDA_VISIBLE_DEVICES=0
+#export CUDA_VISIBLE_DEVICES=0
 
 # Train on Scene Flow training set。注意，nproc_per_node表示所用的GPU个数。
 # val模式:表示训练并且每个epoch结束后都进行验证：train_loader使用“train”数据集，val_loader使用其中的“val”数据集。各数据集文件名见dataloader.py
 #python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py --distributed
 python train.py \
 --mode val \
+--debug_overFit_train 11 \
 --accumulation_steps 1 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/aanet_sceneflow \
@@ -18,7 +19,8 @@ python train.py \
 --feature_type aanet \
 --feature_pyramid_network \
 --milestones 20,30,40,50,60 \
---max_epoch 64 2>&1 |tee logs/log_train_aanet_train.txt
+--max_epoch 64
+#--max_epoch 64 2>&1 |tee logs/log_train_aanet_train.txt
 
 #echo '# Train on mixed KITTI 2012 and KITTI 2015 training set'
 #
