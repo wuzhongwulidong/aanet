@@ -7,7 +7,7 @@ from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAt
 from nets.resnet import AANetFeature
 from nets.cost import CostVolume, CostVolumePyramid
 from nets.aggregation import (StereoNetAggregation, GCNetAggregation, PSMNetBasicAggregation,
-                              PSMNetHGAggregation, AdaptiveAggregation)
+                              PSMNetHGAggregation, AdaptiveAggregation, myDiagAggregation)
 from nets.estimation import DisparityEstimation
 from nets.refinement import StereoNetRefinement, StereoDRNetRefinement, HourglassRefinement
 
@@ -16,7 +16,7 @@ class AANet(nn.Module):
     def __init__(self, max_disp,
                  useFeatureAtt,
                  num_downsample=2,
-                 feature_type='aanet',
+                 feature_type='ganet',  # 'aanet',
                  no_feature_mdconv=False,
                  feature_pyramid=False,
                  feature_pyramid_network=False,
@@ -81,7 +81,7 @@ class AANet(nn.Module):
             featureAttentionInChl = [32, 64, 128]
 
         # self.multiScaleAttention = multiScaleAttention(featureAttentionInChl) if useFeatureAtt else None
-        self.multiScaleAttention = multiScalePAMAttention(featureAttentionInChl, feature_pyramid_network) if useFeatureAtt else None
+        # self.multiScaleAttention = multiScalePAMAttention(featureAttentionInChl, feature_pyramid_network) if useFeatureAtt else None
 
         # Cost volume construction
         # 情形1：多个尺度的特征
@@ -117,6 +117,8 @@ class AANet(nn.Module):
             self.aggregation = GCNetAggregation()
         elif aggregation_type == 'stereonet':
             self.aggregation = StereoNetAggregation(in_channels=in_channels)
+        elif aggregation_type == 'diagConv':
+            self.aggregation = myDiagAggregation(max_disp=max_disp)
         else:
             raise NotImplementedError
 
@@ -149,18 +151,18 @@ class AANet(nn.Module):
 
     def feature_extraction(self, img):
         feature = self.feature_extractor(img)
-        if self.feature_pyramid_network or self.feature_pyramid:
-            feature = self.fpn(feature)
+        # if self.feature_pyramid_network or self.feature_pyramid:
+        #     feature = self.fpn(feature)
         return feature
 
-    def doAttention(self, left_feature, right_feature):
-        """
-        left_feature,right_feature都是三个尺度，尺度之间相差1/2：高分辨率->低分辨率
-        """
-        if self.multiScaleAttention is not None:
-            left_feature, right_feature = self.multiScaleAttention(left_feature, right_feature)
-
-        return left_feature, right_feature
+    # def doAttention(self, left_feature, right_feature):
+    #     """
+    #     left_feature,right_feature都是三个尺度，尺度之间相差1/2：高分辨率->低分辨率
+    #     """
+    #     if self.multiScaleAttention is not None:
+    #         left_feature, right_feature = self.multiScaleAttention(left_feature, right_feature)
+    #
+    #     return left_feature, right_feature
 
     def cost_volume_construction(self, left_feature, right_feature):
         cost_volume = self.cost_volume(left_feature, right_feature)
@@ -232,10 +234,8 @@ class AANet(nn.Module):
         left_feature = self.feature_extraction(left_img)
         right_feature = self.feature_extraction(right_img)
 
-        left_feature, right_feature = self.doAttention(left_feature, right_feature)  # H/3, H/6, H/12
-
         cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12. 可能是3D代价体或者4D代价体
-        aggregation = self.aggregation(cost_volume)
+        aggregation = self.aggregation(cost_volume)  # myDiagAggregation
 
         disparity_pyramid = self.disparity_computation(aggregation)  # H/12, H/6, H/3
         disparity_pyramid += self.disparity_refinement(left_img, right_img,

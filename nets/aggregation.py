@@ -1,8 +1,11 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from nets.deform import SimpleBottleneck, DeformSimpleBottleneck
+from nets.myDiagConvUtils import DenseBlock, BottleneckBlock, TransitionBlock, DiagConvBlock
 
 
 def conv3d(in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1):
@@ -412,7 +415,7 @@ class AdaptiveAggregation(nn.Module):
                  mdconv_dilation=2):
         super(AdaptiveAggregation, self).__init__()
 
-        self.max_disp = max_disp
+        self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
         self.num_fusions = num_fusions
         self.intermediate_supervision = intermediate_supervision
@@ -460,5 +463,100 @@ class AdaptiveAggregation(nn.Module):
         out = []  # H/3, H/6, H/12
         for i in range(len(self.final_conv)):
             out = out + [self.final_conv[i](cost_volume[i])]
+
+        return out
+
+
+# 尝试用对角线卷积做代价聚合
+class myDiagAggregation(nn.Module):
+    def __init__(self, max_disp, num_scales=3, num_fusions=6,
+                 num_stage_blocks=1,
+                 num_deform_blocks=2,
+                 intermediate_supervision=True,
+                 deformable_groups=2,
+                 mdconv_dilation=2):
+        super(myDiagAggregation, self).__init__()
+
+        self.max_disp = max_disp  # 最高分辨率代价体的最大视差
+        self.num_scales = num_scales
+        self.num_fusions = num_fusions
+        # self.intermediate_supervision = intermediate_supervision
+        #
+        # fusions = nn.ModuleList()
+        # for i in range(num_fusions):
+        #     # 共使用6个AAModules，其中最后三个使用了变形卷积
+        #     if self.intermediate_supervision:
+        #         num_out_branches = self.num_scales
+        #     else:
+        #         num_out_branches = 1 if i == num_fusions - 1 else self.num_scales
+        #
+        #     if i >= num_fusions - num_deform_blocks:
+        #         simple_bottleneck_module = False
+        #     else:
+        #         simple_bottleneck_module = True
+        #
+        #     fusions.append(AdaptiveAggregationModule(num_scales=self.num_scales,
+        #                                              num_output_branches=num_out_branches,
+        #                                              max_disp=max_disp,
+        #                                              num_blocks=num_stage_blocks,
+        #                                              mdconv_dilation=mdconv_dilation,
+        #                                              deformable_groups=deformable_groups,
+        #                                              simple_bottleneck=simple_bottleneck_module))
+        #
+        # self.fusions = nn.Sequential(*fusions)
+        nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
+        growth_rate = 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
+        in_planes = 2 * growth_rate  # DenseBlock的原始输入的通道数
+        reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
+        # block = BottleneckBlock
+        block = DiagConvBlock
+
+        # 1st conv before any dense block. 输入是代价体：[B, max_disp, H, W],  # 输出[B, in_planes=2*growth_rate=？, H, W]
+        # 输入通道数:max_disp, 输出通道数：2*growth_rate=2*12=24
+        self.conv1 = nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=1, bias=False)
+        # 1st block
+        # 输出[B, in_planes + (nnb_layers-1)*growth_rate=？, H, W]
+        # 输入通道数：2*growth_rate=？， 输出通道数：in_planes + (nnb_layers-1)*growth_rate=？
+        self.block1 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+        # 输入通道数：216，输出通道数：指定
+        # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
+        self.trans1 = TransitionBlock(in_planes, 24)
+
+        # in_planes = int(math.floor(in_planes * reduction))
+        in_planes = 24
+        # 2nd block
+        self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+        # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
+        self.trans2 = TransitionBlock(in_planes, 24)
+
+        # in_planes = int(math.floor(in_planes * reduction))
+        in_planes = 24
+        # 3rd block
+        self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+
+        self.final_conv = nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=0, bias=False)
+        #
+        # self.final_conv = nn.ModuleList()
+        # for i in range(self.num_scales):
+        #     in_channels = max_disp // (2 ** i)
+        #
+        #     self.final_conv.append(nn.Conv2d(in_channels, max_disp // (2 ** i), kernel_size=1))
+        #
+        #     if not self.intermediate_supervision:
+        #         break
+
+    def forward(self, cost_volume):
+        assert not isinstance(cost_volume, list)
+        # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
+
+        # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
+        out = self.conv1(cost_volume)
+        out = self.trans1(self.block1(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+        out = self.trans2(self.block2(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+        out = self.block3(out)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
+        out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
 
         return out
