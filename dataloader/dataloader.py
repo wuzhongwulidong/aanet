@@ -27,12 +27,22 @@ class StereoDataset(Dataset):
         self.save_filename = save_filename
         self.transform = transform
 
-        # 0: debug; 1: overFit; 2: Train
-        tasks = {0: "filenames_debug", 1: "fileNames_overfit", 11: "fileNames_subsetTrain", 2: "filenames"}
+        #        0: debug
+        tasks = {0: "filenames_debug",
+                 # 1: overFit
+                 1: "fileNames_overfit",
+                 # 1x: 子集训练
+                 1_1200: "fileNames_subsetTrain_1200",
+                 1_2400: "fileNames_subsetTrain_2400",
+                 1_4800: "fileNames_subsetTrain_4800",
+                 1_9600: "fileNames_subsetTrain_9600",
+                 1_19200: "fileNames_subsetTrain_19200",
+                 # 2: Train使用全量的训练集
+                 2: "filenames"}
         nameFileDir = tasks[debug_overFit_train]
 
         sceneflow_finalpass_dict = {
-            'train': '{}/SceneFlow_finalpass_train_2400.txt'.format(nameFileDir),
+            'train': '{}/SceneFlow_finalpass_train.txt'.format(nameFileDir),
             'val': '{}/SceneFlow_finalpass_val.txt'.format(nameFileDir),
             'test': '{}/SceneFlow_finalpass_test.txt'.format(nameFileDir)
         }
@@ -136,7 +146,7 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 def getDataLoader(args, logger):
     # Train loader
     # # 0:debug;  1:overFit;  11:在数据子集上训练； 2:Train
-    if args.debug_overFit_train in [0, 11, 2]:
+    if args.debug_overFit_train in [0, 1_1200, 1_2400, 1_1200, 1_4800, 1_9600, 1_19200, 2]:
         train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
                                 transforms.RandomColor(),
                                 transforms.RandomVerticalFlip(),
