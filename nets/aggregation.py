@@ -480,33 +480,10 @@ class myDiagAggregation(nn.Module):
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
         self.num_fusions = num_fusions
-        # self.intermediate_supervision = intermediate_supervision
-        #
-        # fusions = nn.ModuleList()
-        # for i in range(num_fusions):
-        #     # 共使用6个AAModules，其中最后三个使用了变形卷积
-        #     if self.intermediate_supervision:
-        #         num_out_branches = self.num_scales
-        #     else:
-        #         num_out_branches = 1 if i == num_fusions - 1 else self.num_scales
-        #
-        #     if i >= num_fusions - num_deform_blocks:
-        #         simple_bottleneck_module = False
-        #     else:
-        #         simple_bottleneck_module = True
-        #
-        #     fusions.append(AdaptiveAggregationModule(num_scales=self.num_scales,
-        #                                              num_output_branches=num_out_branches,
-        #                                              max_disp=max_disp,
-        #                                              num_blocks=num_stage_blocks,
-        #                                              mdconv_dilation=mdconv_dilation,
-        #                                              deformable_groups=deformable_groups,
-        #                                              simple_bottleneck=simple_bottleneck_module))
-        #
-        # self.fusions = nn.Sequential(*fusions)
+
         nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
         growth_rate = 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
-        in_planes = 2 * growth_rate  # DenseBlock的原始输入的通道数
+        in_planes = 64  # 2 * growth_rate  # DenseBlock的原始输入的通道数
         reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
         # block = BottleneckBlock
         block = DiagConvBlock
@@ -521,32 +498,23 @@ class myDiagAggregation(nn.Module):
         in_planes = int(in_planes + nb_layers * growth_rate)
         # 输入通道数：216，输出通道数：指定
         # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans1 = TransitionBlock(in_planes, 24)
+        self.trans1 = TransitionBlock(in_planes, 64)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 24
+        in_planes = 64
         # 2nd block
         self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
         # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans2 = TransitionBlock(in_planes, 24)
+        self.trans2 = TransitionBlock(in_planes, 64)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 24
+        in_planes = 64
         # 3rd block
         self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
 
         self.final_conv = nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=0, bias=False)
-        #
-        # self.final_conv = nn.ModuleList()
-        # for i in range(self.num_scales):
-        #     in_channels = max_disp // (2 ** i)
-        #
-        #     self.final_conv.append(nn.Conv2d(in_channels, max_disp // (2 ** i), kernel_size=1))
-        #
-        #     if not self.intermediate_supervision:
-        #         break
 
     def forward(self, cost_volume):
         assert not isinstance(cost_volume, list)
