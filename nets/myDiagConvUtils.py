@@ -62,6 +62,7 @@ class BottleneckBlock(nn.Module):
 
 class DiagConvBlock(nn.Module):
     def __init__(self, in_planes, out_planes, dropRate=0.0):
+        """out_planes就是growth_rate"""
         super(DiagConvBlock, self).__init__()
         self.droprate = dropRate
 

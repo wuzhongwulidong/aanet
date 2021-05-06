@@ -237,7 +237,7 @@ class AANet(nn.Module):
         cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12. 可能是3D代价体或者4D代价体
         aggregation = self.aggregation(cost_volume)  # myDiagAggregation
 
-        disparity_pyramid = self.disparity_computation(aggregation)  # H/12, H/6, H/3
+        disparity_pyramid = self.disparity_computation(aggregation)  # H/3
         disparity_pyramid += self.disparity_refinement(left_img, right_img,
                                                        disparity_pyramid[-1])
-        return disparity_pyramid  # H/12, H/6, H/3, H/2, H: 其中H/2, H分辨率的视差图，是从H/3进行视差精确化得到的。
+        return disparity_pyramid  # H/3, H/2, H: 其中H/2, H分辨率的视差图，是从H/3进行视差精确化得到的。

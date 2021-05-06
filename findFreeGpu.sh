@@ -1,6 +1,6 @@
 #!/bin/bash
 echo '[Info] Please ensure that: conda env is Activated.'
-neededMem=11000
+neededMem=9000
 neededGPUs=1
 targetShell='./scripts/DiagAggregation_aanet_train.sh'
 
