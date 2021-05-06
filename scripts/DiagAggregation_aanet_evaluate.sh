@@ -14,7 +14,6 @@ python train.py \
 --val_img_height 576 \
 --val_img_width 960 \
 --feature_type ganet \
---feature_pyramid_network \
 --milestones 20,30,40,50,60 \
 --max_epoch 64 \
 --evaluate_only
