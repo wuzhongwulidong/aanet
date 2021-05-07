@@ -28,7 +28,7 @@ class StereoDataset(Dataset):
         self.transform = transform
 
         #        0: debug
-        tasks = {0: "filenames_debug",
+        tasks = {0: "fileNames_debug",
                  # 1: overFit
                  1: "fileNames_overfit",
                  # 1x: 子集训练
@@ -145,7 +145,7 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 def getDataLoader(args, logger):
     # Train loader
-    # # 0:debug;  1:overFit;  11:在数据子集上训练； 2:Train
+    # # 0:debug;  1:overFit;  1_x:在数据子集上训练； 2:Train全量数据
     if args.debug_overFit_train in [0, 1_1200, 1_2400, 1_1200, 1_4800, 1_9600, 1_19200, 2]:
         train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
                                 transforms.RandomColor(),
