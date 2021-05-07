@@ -7,7 +7,7 @@ from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAt
 from nets.resnet import AANetFeature
 from nets.cost import CostVolume, CostVolumePyramid
 from nets.aggregation import (StereoNetAggregation, GCNetAggregation, PSMNetBasicAggregation,
-                              PSMNetHGAggregation, AdaptiveAggregation, myDiagAggregation)
+                              PSMNetHGAggregation, AdaptiveAggregation, denseAANetAggregation)
 from nets.estimation import DisparityEstimation
 from nets.refinement import StereoNetRefinement, StereoDRNetRefinement, HourglassRefinement
 
@@ -21,7 +21,7 @@ class AANet(nn.Module):
                  feature_pyramid=False,
                  feature_pyramid_network=False,
                  feature_similarity='correlation',
-                 aggregation_type='adaptive',
+                 aggregation_type='denseAANet',  # 'adaptive',
                  num_scales=3,
                  num_fusions=6,
                  deformable_groups=2,
@@ -117,8 +117,8 @@ class AANet(nn.Module):
             self.aggregation = GCNetAggregation()
         elif aggregation_type == 'stereonet':
             self.aggregation = StereoNetAggregation(in_channels=in_channels)
-        elif aggregation_type == 'diagConv':
-            self.aggregation = myDiagAggregation(max_disp=max_disp)
+        elif aggregation_type == 'denseAANet':
+            self.aggregation = denseAANetAggregation(max_disp=max_disp)
         else:
             raise NotImplementedError
 

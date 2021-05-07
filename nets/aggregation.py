@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from nets.deform import SimpleBottleneck, DeformSimpleBottleneck
-from nets.myDiagConvUtils import DenseBlock, BottleneckBlock, TransitionBlock, DiagConvBlock
+from nets.myDenseDeformConvUtils import DenseBlock, BottleneckBlock, TransitionBlock, myDeformConvBlock
 
 
 def conv3d(in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1):
@@ -468,25 +468,26 @@ class AdaptiveAggregation(nn.Module):
 
 
 # 尝试用对角线卷积做代价聚合
-class myDiagAggregation(nn.Module):
+class denseAANetAggregation(nn.Module):
     def __init__(self, max_disp, num_scales=3, num_fusions=6,
                  num_stage_blocks=1,
                  num_deform_blocks=2,
                  intermediate_supervision=True,
                  deformable_groups=2,
                  mdconv_dilation=2):
-        super(myDiagAggregation, self).__init__()
+        super(denseAANetAggregation, self).__init__()
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
         self.num_fusions = num_fusions
 
-        nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
-        growth_rate = 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
-        in_planes = 64  # 2 * growth_rate  # DenseBlock的原始输入的通道数
-        reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
+        nb_layers = 4  # 一个DenseBlock中有多少个BottleneckBlock
+        growth_rate = 16  # 一个DenseBlock的一个的BottleneckBlock输出通道数
+        in_planes = 24  # 2 * growth_rate  # DenseBlock的原始输入的通道数
+        # reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
         # block = BottleneckBlock
-        block = DiagConvBlock
+        # block = DiagConvBlock
+        block = myDeformConvBlock
 
         # 1st conv before any dense block. 输入是代价体：[B, max_disp, H, W],  # 输出[B, in_planes=2*growth_rate=？, H, W]
         # 输入通道数:max_disp, 输出通道数：2*growth_rate=2*12=24
@@ -498,18 +499,18 @@ class myDiagAggregation(nn.Module):
         in_planes = int(in_planes + nb_layers * growth_rate)
         # 输入通道数：216，输出通道数：指定
         # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans1 = TransitionBlock(in_planes, 64)
+        self.trans1 = TransitionBlock(in_planes, 24)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 64
+        in_planes = 24
         # 2nd block
         self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
         # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans2 = TransitionBlock(in_planes, 64)
+        self.trans2 = TransitionBlock(in_planes, 24)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 64
+        in_planes = 24
         # 3rd block
         self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
