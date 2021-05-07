@@ -6,11 +6,11 @@
 #python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py --distributed
 python train.py \
 --mode val \
---debug_overFit_train 1_2400 \
+--debug_overFit_train 1_1200 \
 --accumulation_steps 1 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/DiagAggregation_AANet \
---batch_size 4 \
+--batch_size 6 \
 --val_batch_size 1 \
 --img_height 288 \
 --img_width 576 \
