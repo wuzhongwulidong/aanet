@@ -7,6 +7,7 @@
 python train.py \
 --mode val \
 --debug_overFit_train 1_2400 \
+--learning_rate 0.001 \
 --accumulation_steps 1 \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/DiagAggregation_AANet \

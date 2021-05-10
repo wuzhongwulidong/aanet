@@ -98,6 +98,7 @@ class Model(object):
                 elif len(pred_disp_pyramid) == 4:
                     pyramid_weight = [1 / 3, 2 / 3, 1.0, 1.0]
                 elif len(pred_disp_pyramid) == 3:
+                    # pyramid_weight = [1.0, 1.0, 1.0]  # 1 scale only
                     pyramid_weight = [1.0, 1.0, 1.0]  # 1 scale only
                 elif len(pred_disp_pyramid) == 1:
                     pyramid_weight = [1.0]  # highest loss only

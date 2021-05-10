@@ -34,9 +34,9 @@ class StereoDataset(Dataset):
                  # 1x: 子集训练
                  1_1200: "fileNames_subsetTrain_1200",
                  1_2400: "fileNames_subsetTrain_2400",
-                 1_4800: "fileNames_subsetTrain_4800",
-                 1_9600: "fileNames_subsetTrain_9600",
-                 1_19200: "fileNames_subsetTrain_19200",
+                 1_4800: "filenames_subsetTrain_4800",
+                 1_9600: "filenames_subsetTrain_9600",
+                 1_19200: "filenames_subsetTrain_19200",
                  # 2: Train使用全量的训练集
                  2: "filenames"}
         nameFileDir = tasks[debug_overFit_train]
