@@ -483,7 +483,7 @@ class myDiagAggregation(nn.Module):
 
         nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
         growth_rate = 12  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
-        in_planes = 32  # 2 * growth_rate  # DenseBlock的原始输入的通道数
+        in_planes = 64  # 2 * growth_rate  # DenseBlock的原始输入的通道数
         # reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
         # block = BottleneckBlock
         block = DiagConvBlock
@@ -498,18 +498,18 @@ class myDiagAggregation(nn.Module):
         in_planes = int(in_planes + nb_layers * growth_rate)
         # 输入通道数：216，输出通道数：指定
         # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans1 = TransitionBlock(in_planes, 32)
+        self.trans1 = TransitionBlock(in_planes, 64)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 32
+        in_planes = 64
         # 2nd block
         self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
         # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans2 = TransitionBlock(in_planes, 32)
+        self.trans2 = TransitionBlock(in_planes, 64)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 32
+        in_planes = 64
         # 3rd block
         self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
