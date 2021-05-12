@@ -70,21 +70,21 @@ class RandomCrop(object):
 
             assert top_pad >= 0 and right_pad >= 0
 
-            sample['left'] = np.lib.pad(sample['left'],
-                                        ((top_pad, 0), (0, right_pad), (0, 0)),
-                                        mode='symmetric')
-            sample['right'] = np.lib.pad(sample['right'],
-                                         ((top_pad, 0), (0, right_pad), (0, 0)),
-                                         mode='symmetric')
-
             # sample['left'] = np.lib.pad(sample['left'],
             #                             ((top_pad, 0), (0, right_pad), (0, 0)),
-            #                             mode='constant',
-            #                             constant_values=0)
+            #                             mode='symmetric')
             # sample['right'] = np.lib.pad(sample['right'],
             #                              ((top_pad, 0), (0, right_pad), (0, 0)),
-            #                              mode='constant',
-            #                              constant_values=0)
+            #                              mode='symmetric')
+
+            sample['left'] = np.lib.pad(sample['left'],
+                                        ((top_pad, 0), (0, right_pad), (0, 0)),
+                                        mode='constant',
+                                        constant_values=0)
+            sample['right'] = np.lib.pad(sample['right'],
+                                         ((top_pad, 0), (0, right_pad), (0, 0)),
+                                         mode='constant',
+                                         constant_values=0)
             if 'disp' in sample.keys():
                 sample['disp'] = np.lib.pad(sample['disp'],
                                             ((top_pad, 0), (0, right_pad)),

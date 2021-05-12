@@ -482,15 +482,15 @@ class myDiagAggregation(nn.Module):
         self.num_fusions = num_fusions
 
         nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
-        growth_rate = 12  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
-        in_planes = 64  # 2 * growth_rate  # DenseBlock的原始输入的通道数
+        growth_rate = 16  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
+        in_planes = 24  # 2 * growth_rate  # DenseBlock的原始输入的通道数
         # reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
         # block = BottleneckBlock
         block = DiagConvBlock
 
         # 1st conv before any dense block. 输入是代价体：[B, max_disp, H, W],  # 输出[B, in_planes=2*growth_rate=？, H, W]
         # 输入通道数:max_disp, 输出通道数：2*growth_rate=2*12=24
-        self.conv1 = nn.Conv2d(max_disp, in_planes, kernel_size=1, stride=1, padding=0, bias=False)
+        self.conv1 = nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=0, bias=False)
         # 1st block
         # 输出[B, in_planes + (nnb_layers-1)*growth_rate=？, H, W]
         # 输入通道数：2*growth_rate=？， 输出通道数：in_planes + (nnb_layers-1)*growth_rate=？
@@ -498,20 +498,26 @@ class myDiagAggregation(nn.Module):
         in_planes = int(in_planes + nb_layers * growth_rate)
         # 输入通道数：216，输出通道数：指定
         # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans1 = TransitionBlock(in_planes, 64)
+        self.trans1 = TransitionBlock(in_planes, 24)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 64
+        in_planes = 24
         # 2nd block
         self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
         # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans2 = TransitionBlock(in_planes, 64)
+        self.trans2 = TransitionBlock(in_planes, 24)
 
         # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 64
+        in_planes = 24
         # 3rd block
         self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+        self.trans2 = TransitionBlock(in_planes, 24)
+
+        in_planes = 24
+        # 3rd block
+        self.block4 = DenseBlock(nb_layers, in_planes, growth_rate, block)
         in_planes = int(in_planes + nb_layers * growth_rate)
 
         self.final_conv = nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=1, bias=False)
