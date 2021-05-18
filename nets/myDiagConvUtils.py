@@ -92,3 +92,57 @@ class DiagConvBlock(nn.Module):
         out4 = self.conv4(self.relu4(self.bn4(x)))
 
         return torch.cat([x, out1, out2, out3, out4], 1)
+
+
+# class TransitionBlock(nn.Module):
+#     def __init__(self, in_planes, out_planes, dropRate=0.0):
+#         super(TransitionBlock, self).__init__()
+#         self.conv1 = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1,
+#                                padding=0, bias=False)
+#         self.bn1 = nn.BatchNorm2d(out_planes)
+#         self.relu = nn.ReLU(inplace=True)
+#
+#         self.droprate = dropRate
+#
+#     def forward(self, x):
+#         out = self.relu(self.bn1(self.conv1(x)))
+#         if self.droprate > 0:
+#             out = F.dropout(out, p=self.droprate, inplace=False, training=self.training)
+#         # return F.avg_pool2d(out, 2)
+#         return out
+
+
+# class DiagConvBlock(nn.Module):
+#     def __init__(self, in_planes, out_planes, dropRate=0.0):
+#         """out_planes就是growth_rate"""
+#         super(DiagConvBlock, self).__init__()
+#         self.droprate = dropRate
+#
+#         assert out_planes % 4 == 0
+#         inter_planes = out_planes // 4
+#         # 1. 水平卷积
+#         self.conv1 = nn.Conv2d(in_planes, inter_planes, kernel_size=[1, 3], stride=1, padding=[0, 1], bias=False)
+#         self.bn1 = nn.BatchNorm2d(inter_planes)
+#         self.relu1 = nn.ReLU(inplace=True)
+#         # 2. 垂直卷积
+#         self.conv2 = nn.Conv2d(in_planes, inter_planes, kernel_size=[3, 1], stride=1, padding=[1, 0], bias=False)
+#         self.bn2 = nn.BatchNorm2d(inter_planes)
+#         self.relu2 = nn.ReLU(inplace=True)
+#         # 3. 主对角线卷积
+#         self.bn3 = nn.BatchNorm2d(in_planes)
+#         self.relu3 = nn.ReLU(inplace=True)
+#         self.conv3 = diagConv2d_p(in_planes, inter_planes, kernel_size=3, stride=1, padding=1, bias=False)
+#         self.bn3 = nn.BatchNorm2d(inter_planes)
+#         self.relu3 = nn.ReLU(inplace=True)
+#         # 4. 反对角线卷积
+#         self.conv4 = diagConv2d_n(in_planes, inter_planes, kernel_size=3, stride=1, padding=1, bias=False)
+#         self.bn4 = nn.BatchNorm2d(inter_planes)
+#         self.relu4 = nn.ReLU(inplace=True)
+#
+#     def forward(self, x):
+#         out1 = self.relu1(self.bn1(self.conv1(x)))
+#         out2 = self.relu2(self.bn2(self.conv2(x)))
+#         out3 = self.relu3(self.bn3(self.conv3(x)))
+#         out4 = self.relu4(self.bn4(self.conv4(x)))
+#
+#         return torch.cat([x, out1, out2, out3, out4], 1)

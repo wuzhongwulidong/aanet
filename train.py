@@ -236,6 +236,7 @@ def main():
                                                                 milestones=milestones,
                                                                 gamma=args.lr_decay_gamma,
                                                                 last_epoch=last_epoch)  # 最后这个last_epoch参数很重要：如果是resume的话，则会自动调整学习率适去应last_epoch。
+            logger.info('=>lr_scheduler.get_lr():{}'.format(lr_scheduler.state_dict()))
         else:
             raise NotImplementedError
     # model.Model(object)对AANet做了进一步封装。
