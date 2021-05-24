@@ -5,7 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from nets.deform import SimpleBottleneck, DeformSimpleBottleneck
-from nets.myDiagConvUtils import DenseBlock, BottleneckBlock, TransitionBlock, DiagConvBlock
+from nets.myDiagConvUtils import DenseBlock, BottleneckBlock, TransitionBlock, DiagConvBlock, myNewTransitionBlock, \
+    myNewDiagConvBlock
 
 
 def conv3d(in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1):
@@ -467,85 +468,8 @@ class AdaptiveAggregation(nn.Module):
         return out
 
 
-
-# 尝试用对角线卷积做代价聚合
-class myDiagAggregation(nn.Module):
-    def __init__(self, max_disp, num_scales=3, num_fusions=6,
-                 num_stage_blocks=1,
-                 num_deform_blocks=2,
-                 intermediate_supervision=True,
-                 deformable_groups=2,
-                 mdconv_dilation=2):
-        super(myDiagAggregation, self).__init__()
-
-        self.max_disp = max_disp  # 最高分辨率代价体的最大视差
-        self.num_scales = num_scales
-        self.num_fusions = num_fusions
-
-        nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
-        growth_rate = 24  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
-        in_planes = 24  # 2 * growth_rate  # DenseBlock的原始输入的通道数
-        # reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
-        # block = BottleneckBlock
-        block = DiagConvBlock
-
-        # 1st conv before any dense block. 输入是代价体：[B, max_disp, H, W],  # 输出[B, in_planes=2*growth_rate=？, H, W]
-        # 输入通道数:max_disp, 输出通道数：2*growth_rate=2*12=24
-        self.conv1 = nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=1, bias=False)  # pading不要搞錯了！！！
-        # 1st block
-        # 输出[B, in_planes + (nnb_layers-1)*growth_rate=？, H, W]
-        # 输入通道数：2*growth_rate=？， 输出通道数：in_planes + (nnb_layers-1)*growth_rate=？
-        self.block1 = DenseBlock(nb_layers, in_planes, growth_rate, block)
-        in_planes = int(in_planes + nb_layers * growth_rate)
-        # 输入通道数：216，输出通道数：指定
-        # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans1 = TransitionBlock(in_planes, 24)
-
-        # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 24
-        # 2nd block
-        self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
-        in_planes = int(in_planes + nb_layers * growth_rate)
-        # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-        self.trans2 = TransitionBlock(in_planes, 24)
-
-        # in_planes = int(math.floor(in_planes * reduction))
-        in_planes = 24
-        # 3rd block
-        self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
-        in_planes = int(in_planes + nb_layers * growth_rate)
-        # self.trans2 = TransitionBlock(in_planes, 24)
-        #
-        # in_planes = 24
-        # # 3rd block
-        # self.block4 = DenseBlock(nb_layers, in_planes, growth_rate, block)
-        # in_planes = int(in_planes + nb_layers * growth_rate)
-
-        self.final_conv = nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=0, bias=False)
-
-    def forward(self, cost_volume):
-        assert not isinstance(cost_volume, list)
-        # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
-
-        # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
-        out = self.conv1(cost_volume)
-        out = self.trans1(self.block1(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-        out = self.trans2(self.block2(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-        out = self.block3(out)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
-        out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
-
-        return out
-
-# class myFuseBlock(nn.Module):
-#     def __init__(self):
-#         super(myFuseBlock, self).__init__()
-#
-#     def forward(self, ori_volume, diag_volume):
-#
-#         return ori_volume + diag_volume
-
-# 尝试用对角线卷积做代价聚合
-# class myNewDiagAggregation(nn.Module):
+# # 尝试用对角线卷积做代价聚合
+# class myDiagAggregation(nn.Module):
 #     def __init__(self, max_disp, num_scales=3, num_fusions=6,
 #                  num_stage_blocks=1,
 #                  num_deform_blocks=2,
@@ -559,21 +483,15 @@ class myDiagAggregation(nn.Module):
 #         self.num_fusions = num_fusions
 #
 #         nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
-#         growth_rate = 20  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
-#         in_planes = 64  # 2 * growth_rate  # DenseBlock的原始输入的通道数
+#         growth_rate = 24  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
+#         in_planes = 24  # 2 * growth_rate  # DenseBlock的原始输入的通道数
 #         # reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
 #         # block = BottleneckBlock
 #         block = DiagConvBlock
 #
 #         # 1st conv before any dense block. 输入是代价体：[B, max_disp, H, W],  # 输出[B, in_planes=2*growth_rate=？, H, W]
 #         # 输入通道数:max_disp, 输出通道数：2*growth_rate=2*12=24
-#         # self.conv1 = nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=0, bias=False)
-#         self.conv1 = nn.Sequential(nn.Conv2d(max_disp, max_disp, kernel_size=3, stride=1, padding=1, bias=False),
-#                                    nn.BatchNorm2d(in_planes),
-#                                    nn.ReLU(inplace=True),
-#                                    nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=1, bias=False),
-#                                    nn.BatchNorm2d(in_planes),
-#                                    nn.ReLU(inplace=True))
+#         self.conv1 = nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=1, bias=False)  # pading不要搞錯了！！！
 #         # 1st block
 #         # 输出[B, in_planes + (nnb_layers-1)*growth_rate=？, H, W]
 #         # 输入通道数：2*growth_rate=？， 输出通道数：in_planes + (nnb_layers-1)*growth_rate=？
@@ -581,90 +499,175 @@ class myDiagAggregation(nn.Module):
 #         in_planes = int(in_planes + nb_layers * growth_rate)
 #         # 输入通道数：216，输出通道数：指定
 #         # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-#         self.trans1 = TransitionBlock(in_planes, 64)
-#         self.fuse1 = myFuseBlock()
+#         self.trans1 = TransitionBlock(in_planes, 24)
 #
 #         # in_planes = int(math.floor(in_planes * reduction))
-#         in_planes = 64
+#         in_planes = 24
 #         # 2nd block
 #         self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
 #         in_planes = int(in_planes + nb_layers * growth_rate)
 #         # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
-#         self.trans2 = TransitionBlock(in_planes, 64)
-#         self.fuse2 = myFuseBlock()
+#         self.trans2 = TransitionBlock(in_planes, 24)
 #
 #         # in_planes = int(math.floor(in_planes * reduction))
-#         in_planes = 64
+#         in_planes = 24
 #         # 3rd block
 #         self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
 #         in_planes = int(in_planes + nb_layers * growth_rate)
-#         self.trans3 = TransitionBlock(in_planes, 64)
-#         self.fuse3 = myFuseBlock()
+#         # self.trans2 = TransitionBlock(in_planes, 24)
 #         #
 #         # in_planes = 24
 #         # # 3rd block
 #         # self.block4 = DenseBlock(nb_layers, in_planes, growth_rate, block)
 #         # in_planes = int(in_planes + nb_layers * growth_rate)
 #
-#         # TODO：此处在final_conv之前加上：self.bn1 = nn.BatchNorm2d(in_planes) self.relu = nn.ReLU(inplace=True)
-#         self.final_conv = nn.Sequential(nn.Conv2d(64, max_disp, kernel_size=1, stride=1, padding=0, bias=False))
-#
-#         # self.final_conv = nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=1, bias=False)
-#         # self.final_conv = nn.Sequential([nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=1, bias=False)])
-#
-#         # # TODO：此处加上参数参数初始化，重新测试：
-#         # for m in self.modules():
-#         #     if isinstance(m, nn.Conv2d):
-#         #         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-#         #         m.weight.data.normal_(0, math.sqrt(2. / n))
-#         #     elif isinstance(m, nn.BatchNorm2d):
-#         #         m.weight.data.fill_(1)
-#         #         m.bias.data.zero_()
-#         #     elif isinstance(m, nn.Linear):
-#         #         m.bias.data.zero_()
+#         self.final_conv = nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=0, bias=False)
 #
 #     def forward(self, cost_volume):
 #         assert not isinstance(cost_volume, list)
 #         # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
 #
 #         # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
-#         init = self.conv1(cost_volume)
-#         out = self.trans1(self.block1(init))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-#         init = self.fuse1(init, out)
-#
-#         out = self.trans2(self.block2(init))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-#         init = self.fuse2(init, out)
-#
-#         out = self.trans3(self.block3(init))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
-#         out = self.fuse3(init, out)
-#
+#         out = self.conv1(cost_volume)
+#         out = self.trans1(self.block1(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+#         out = self.trans2(self.block2(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+#         out = self.block3(out)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
 #         out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
 #
 #         return out
-#
-#
-#     # def forward(self, cost_volume):
-#     #     assert not isinstance(cost_volume, list)
-#     #     # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
-#     #
-#     #     # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
-#     #     out = self.conv1(cost_volume)
-#     #     out = self.trans1(self.block1(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-#     #     out = self.trans2(self.block2(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-#     #     out = self.block3(out)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
-#     #     out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
-#     #
-#     #     return out
-#
-#     # def forward(self, cost_volume):
-#     #     assert not isinstance(cost_volume, list)
-#     #     # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
-#     #
-#     #     # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
-#     #     out = self.conv1(cost_volume)
-#     #     out = self.trans1(self.block1(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-#     #     out = self.trans2(self.block2(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
-#     #     out = self.block3(out)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
-#     #     out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
-#     #
-#     #     return out
+
+
+class myFuseBlock(nn.Module):
+    def __init__(self):
+        super(myFuseBlock, self).__init__()
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
+
+    def forward(self, ori_volume, diag_volume):
+        # return self.relu(ori_volume + diag_volume)
+        return ori_volume + diag_volume
+
+
+# 尝试用对角线卷积做代价聚合
+class myResDiagAggregation(nn.Module):
+    def __init__(self, max_disp, num_scales=3, num_fusions=6,
+                 num_stage_blocks=1,
+                 num_deform_blocks=2,
+                 intermediate_supervision=True,
+                 deformable_groups=2,
+                 mdconv_dilation=2):
+        super(myResDiagAggregation, self).__init__()
+
+        self.max_disp = max_disp  # 最高分辨率代价体的最大视差
+        self.num_scales = num_scales
+        self.num_fusions = num_fusions
+
+        nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
+        growth_rate = 12  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
+        in_planes = 24  # 2 * growth_rate  # DenseBlock的原始输入的通道数
+        # reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
+        # block = BottleneckBlock
+        # block = DiagConvBlock  # bn + relu + conv
+        block = myNewDiagConvBlock  # conv + bn + relu
+
+        # 1st conv before any dense block. 输入是代价体：[B, max_disp, H, W],  # 输出[B, in_planes=2*growth_rate=？, H, W]
+        # 输入通道数:max_disp, 输出通道数：2*growth_rate=2*12=24
+        # self.conv1 = nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=0, bias=False)
+        self.conv1 = nn.Sequential(nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=1, bias=False),
+                                   nn.BatchNorm2d(in_planes),
+                                   nn.LeakyReLU(0.2, inplace=True))
+                                   # nn.Conv2d(max_disp, in_planes, kernel_size=3, stride=1, padding=1, bias=False),
+                                   # nn.BatchNorm2d(in_planes),
+                                   # nn.LeakyReLU(0.2, inplace=True))
+        # 1st block
+        # 输出[B, in_planes + (nnb_layers-1)*growth_rate=？, H, W]
+        # 输入通道数：in_planes=？， 输出通道数：in_planes + nnb_layers*growth_rate=？
+        self.block1 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+        # 输入通道数：216，输出通道数：指定
+        # self.trans1 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
+        self.trans1 = myNewTransitionBlock(in_planes, 24)
+        self.fuse1 = myFuseBlock()
+
+        # in_planes = int(math.floor(in_planes * reduction))
+        in_planes = 24
+        # 2nd block
+        self.block2 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+        # self.trans2 = TransitionBlock(in_planes, int(math.floor(in_planes * reduction)))
+        self.trans2 = myNewTransitionBlock(in_planes, 24)
+        self.fuse2 = myFuseBlock()
+
+        # in_planes = int(math.floor(in_planes * reduction))
+        in_planes = 24
+        # 3rd block
+        self.block3 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+        # self.trans3 = myNewTransitionBlock(in_planes, 24)
+        # self.fuse3 = myFuseBlock()
+        #
+        # in_planes = 24
+        # # 3rd block
+        # self.block4 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        # in_planes = int(in_planes + nb_layers * growth_rate)
+
+        self.final_conv = nn.Sequential(nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=0, bias=False))
+
+        # self.final_conv = nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=1, bias=False)
+        # self.final_conv = nn.Sequential([nn.Conv2d(in_planes, max_disp, kernel_size=1, stride=1, padding=1, bias=False)])
+
+        # # TODO：此处加上参数参数初始化，重新测试：
+        # for m in self.modules():
+        #     if isinstance(m, nn.Conv2d):
+        #         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+        #         m.weight.data.normal_(0, math.sqrt(2. / n))
+        #     elif isinstance(m, nn.BatchNorm2d):
+        #         m.weight.data.fill_(1)
+        #         m.bias.data.zero_()
+        #     elif isinstance(m, nn.Linear):
+        #         m.bias.data.zero_()
+
+    def forward(self, cost_volume):
+        assert not isinstance(cost_volume, list)
+        # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
+
+        # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
+        init = self.conv1(cost_volume)
+        out = self.trans1(self.block1(init))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+        init = self.fuse1(init, out)
+
+        out = self.trans2(self.block2(init))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+        init = self.fuse2(init, out)
+
+        # out = self.trans3(self.block3(init))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
+        # init = self.fuse3(init, out)
+        init = self.block3(init)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
+
+        out = self.final_conv(init)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
+
+        return out
+
+    # def forward(self, cost_volume):
+    #     assert not isinstance(cost_volume, list)
+    #     # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
+    #
+    #     # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
+    #     out = self.conv1(cost_volume)
+    #     out = self.trans1(self.block1(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+    #     out = self.trans2(self.block2(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+    #     out = self.block3(out)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
+    #     out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
+    #
+    #     return out
+
+    # def forward(self, cost_volume):
+    #     assert not isinstance(cost_volume, list)
+    #     # TODO：只使用最高尺度的代价体[B, max_disp, H, W]
+    #
+    #     # 输入torch.Size([B, 64, 96, 192])=[B, max_disp/3, H/3, W3]; 输出：torch.Size([B, 24, H/3, W3])
+    #     out = self.conv1(cost_volume)
+    #     out = self.trans1(self.block1(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+    #     out = self.trans2(self.block2(out))  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3] -> [B, 24, H/3, W3]
+    #     out = self.block3(out)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
+    #     out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
+    #
+    #     return out

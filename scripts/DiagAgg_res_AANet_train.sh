@@ -18,7 +18,7 @@ python train.py \
 --val_img_height 576 \
 --val_img_width 960 \
 --feature_type ganet \
---milestones 20,35,50,65,80,95 \
+--milestones 20,30,40,50,60,70,80 \
 --max_epoch 100 \
 
 #--milestones 20,30,40,50,60 \

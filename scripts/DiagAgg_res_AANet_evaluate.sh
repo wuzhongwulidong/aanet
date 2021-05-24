@@ -18,7 +18,8 @@ python train.py \
 --max_epoch 64 \
 --evaluate_only
 
-
+#--val_img_height 576 \
+#--val_img_width 960 \
 # Evaluate a specific model on Scene Flow test set
 #CUDA_VISIBLE_DEVICES=0 python train.py \
 #--mode test \
