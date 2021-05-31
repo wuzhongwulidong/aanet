@@ -1,6 +1,8 @@
+import torch
 import torch.nn as nn
 
 from nets.deform_conv import DeformConv, ModulatedDeformConv
+from nets.diagConv.diagConv import diagConv2d_p, diagConv2d_n
 
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):

@@ -151,8 +151,8 @@ class AANet(nn.Module):
 
     def feature_extraction(self, img):
         feature = self.feature_extractor(img)
-        # if self.feature_pyramid_network or self.feature_pyramid:
-        #     feature = self.fpn(feature)
+        if self.feature_pyramid_network or self.feature_pyramid:
+            feature = self.fpn(feature)
         return feature
 
     # def doAttention(self, left_feature, right_feature):

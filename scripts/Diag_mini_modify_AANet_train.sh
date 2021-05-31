@@ -6,19 +6,20 @@
 #python -m torch.distributed.launch  --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=29501 train.py --distributed
 python train.py \
 --mode val \
---debug_overFit_train 2 \
+--debug_overFit_train 1 \
 --learning_rate 0.001 \
 --accumulation_steps 1 \
 --data_dir data/SceneFlow \
---checkpoint_dir checkpoints/DiagAggregation_AANet \
---batch_size 4 \
+--checkpoint_dir checkpoints/Diag_mini_modify_AANet \
+--batch_size 6 \
 --val_batch_size 1 \
 --img_height 288 \
 --img_width 576 \
 --val_img_height 576 \
 --val_img_width 960 \
---feature_type ganet \
---milestones 20,35,50,65,80,95 \
+--feature_type aanet \
+--feature_pyramid_network \
+--milestones 20,30,40,50,60 \
 --max_epoch 100 \
 
 #--milestones 20,30,40,50,60 \

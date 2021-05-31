@@ -2,7 +2,7 @@
 echo '[Info] Please ensure that: conda env is Activated.'
 neededMem=11000
 neededGPUs=1
-targetShell='./scripts/DiagAggregation_aanet_train.sh'
+targetShell='./scripts/Diag_mini_modify_AANet_train.sh'
 
 echo "neededMem=$neededMem MB"
 echo "neededGPUs=$neededGPUs"

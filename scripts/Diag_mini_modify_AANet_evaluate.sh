@@ -6,18 +6,18 @@ python train.py \
 --debug_overFit_train 2 \
 --useFeatureAtt 1 \
 --accumulation_steps 1 \
---checkpoint_dir checkpoints/DiagAggregation_AANet \
+--checkpoint_dir checkpoints/Diag_mini_modify_AANet \
 --batch_size 6 \
 --val_batch_size 1 \
 --img_height 288 \
 --img_width 576 \
 --val_img_height 576 \
 --val_img_width 960 \
---feature_type ganet \
+--feature_type aanet \
+--feature_pyramid_network \
 --milestones 20,30,40,50,60 \
 --max_epoch 64 \
 --evaluate_only
-
 
 # Evaluate a specific model on Scene Flow test set
 #CUDA_VISIBLE_DEVICES=0 python train.py \

@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from nets.deform import SimpleBottleneck, DeformSimpleBottleneck
+from nets.diagConv.diagConv import diagConv2d_p, diagConv2d_n
 from nets.myDiagConvUtils import DenseBlock, BottleneckBlock, TransitionBlock, DiagConvBlock
 
 
@@ -334,7 +335,8 @@ class AdaptiveAggregationModule(nn.Module):
             branch = nn.ModuleList()
             for j in range(num_blocks):
                 if simple_bottleneck:
-                    branch.append(SimpleBottleneck(num_candidates, num_candidates))
+                    # branch.append(SimpleBottleneck(num_candidates, num_candidates))
+                    branch.append(myDiagSimpleBottleneck(num_candidates, num_candidates))
                 else:
                     branch.append(DeformSimpleBottleneck(num_candidates, num_candidates, modulation=True,
                                                          mdconv_dilation=mdconv_dilation,
@@ -483,7 +485,7 @@ class myDiagAggregation(nn.Module):
         self.num_fusions = num_fusions
 
         nb_layers = 8  # 一个DenseBlock中有多少个BottleneckBlock
-        growth_rate = 24  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
+        growth_rate = 12  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
         in_planes = 24  # 2 * growth_rate  # DenseBlock的原始输入的通道数
         # reduction = 1 / 8  # DenseBlock的输出的通道数(通过TransitionBlock实现)的降低比例。
         # block = BottleneckBlock
@@ -535,6 +537,72 @@ class myDiagAggregation(nn.Module):
         out = self.final_conv(out)  # [B, 120,  H/3, W3] -> [B, 64,  H/3, W3]
 
         return out
+
+
+class myIntraScaleDiagConvBlock(nn.Module):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
+                 base_width=64, dilation=1, norm_layer=None):
+        """out_planes就是growth_rate"""
+        super(myIntraScaleDiagConvBlock, self).__init__()
+
+        assert planes % 4 == 0
+        inter_planes = planes // 4
+        # 1. 水平卷积
+        self.conv1 = nn.Conv2d(inplanes, inter_planes, kernel_size=[1, 3], stride=1, padding=[0, 1], bias=False)
+        self.bn1 = nn.BatchNorm2d(inter_planes)
+        self.relu1 = nn.ReLU(inplace=True)
+        # 2. 垂直卷积
+        self.conv2 = nn.Conv2d(inplanes, inter_planes, kernel_size=[3, 1], stride=1, padding=[1, 0], bias=False)
+        self.bn2 = nn.BatchNorm2d(inter_planes)
+        self.relu2 = nn.ReLU(inplace=True)
+        # 3. 主对角线卷积
+        self.conv3 = diagConv2d_p(inplanes, inter_planes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(inter_planes)
+        self.relu3 = nn.ReLU(inplace=True)
+        # 4. 反对角线卷积
+        self.conv4 = diagConv2d_n(inplanes, inter_planes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn4 = nn.BatchNorm2d(inter_planes)
+        self.relu4 = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        out1 = self.relu1(self.bn1(self.conv1(x)))
+        out2 = self.relu2(self.bn2(self.conv2(x)))
+        out3 = self.relu3(self.bn3(self.conv3(x)))
+        out4 = self.relu4(self.bn4(self.conv4(x)))
+
+        return torch.cat([x, out1, out2, out3, out4], 1)
+        # return torch.cat([out1, out2, out3, out4], 1)
+
+
+class myDiagSimpleBottleneck(nn.Module):
+    def __init__(self, in_planes, out_planes, num_scales=3, num_fusions=6):
+        super(myDiagSimpleBottleneck, self).__init__()
+        # in_planes: DenseBlock的原始输入的通道数
+
+        self.max_disp = in_planes
+        self.num_scales = num_scales
+        self.num_fusions = num_fusions
+
+        nb_layers = 4  # 一个DenseBlock中有多少个BottleneckBlock
+        growth_rate = in_planes * 1  # 12  # 一个DenseBlock的一个的BottleneckBlock输出通道数
+        block = myIntraScaleDiagConvBlock
+
+        self.block1 = DenseBlock(nb_layers, in_planes, growth_rate, block)
+        in_planes = int(in_planes + nb_layers * growth_rate)
+        # in_planes = int(nb_layers * growth_rate)
+        self.final_conv = nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False)
+        self.final_bn = nn.BatchNorm2d(out_planes)
+        self.final_relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+
+        out = self.block1(x)  # [B, 24, H/3, W3] -> [B, 120,  H/3, W3]
+        out = self.final_conv(out)
+
+        out = self.final_relu(self.final_bn(out))
+        return out
+
+
 
 # class myFuseBlock(nn.Module):
 #     def __init__(self):

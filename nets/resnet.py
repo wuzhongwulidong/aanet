@@ -169,7 +169,7 @@ class AANetFeature(nn.Module):
         if stride != 1 or self.inplanes != planes * block.expansion:
             # Bottleneck的Skip Connecttion
             downsample = nn.Sequential(
-                # 1x1卷积（若stride>1，则同时又下采样的作用），输出通道数增大block.expansion倍（4倍）
+                # 1x1卷积（若stride>1，则同时有下采样的作用），输出通道数增大block.expansion倍（4倍）
                 conv1x1(self.inplanes, planes * block.expansion, stride),
                 norm_layer(planes * block.expansion),
             )

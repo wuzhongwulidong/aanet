@@ -59,7 +59,7 @@ parser.add_argument('--feature_pyramid_network', action='store_true', help='Use 
 parser.add_argument('--feature_similarity', default='correlation', type=str,
                     help='Similarity measure for matching cost')
 parser.add_argument('--num_downsample', default=2, type=int, help='Number of downsample layer for feature extraction')
-parser.add_argument('--aggregation_type', default='diagConv', type=str, help='Type of cost aggregation')
+parser.add_argument('--aggregation_type', default='adaptive', type=str, help='Type of cost aggregation')
 parser.add_argument('--num_scales', default=3, type=int, help='Number of stages when using parallel aggregation')
 parser.add_argument('--num_fusions', default=6, type=int, help='Number of multi-scale fusions when using parallel'
                                                                'aggragetion')
@@ -261,7 +261,7 @@ def main():
                     train_loader.sampler.set_epoch(epoch)
                     logger.info('train_loader.sampler.set_epoch({})'.format(epoch))
                 train_model.train(train_loader, local_master, trainLoss_dict, trainLossKey)
-            if not args.no_validate:
+            if not args.no_validate and args.debug_overFit_train != 1:
                 train_model.validate(val_loader, local_master, valLoss_dict, valLossKey)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
                 lr_scheduler.step()  # 调整Learning Rate
