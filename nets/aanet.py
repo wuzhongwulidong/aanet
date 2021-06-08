@@ -3,11 +3,13 @@ import torch.nn.functional as F
 
 from nets.feature import (StereoNetFeature, PSMNetFeature, GANetFeature, GCNetFeature,
                           FeaturePyrmaid, FeaturePyramidNetwork)
-from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAttention
+# from nets.myAttentionFeature import myRawFeature, myAttentionBlock, multiScaleAttention, multiScalePAMAttention
 from nets.resnet import AANetFeature
 from nets.cost import CostVolume, CostVolumePyramid
 from nets.aggregation import (StereoNetAggregation, GCNetAggregation, PSMNetBasicAggregation,
-                              PSMNetHGAggregation, AdaptiveAggregation)
+                              PSMNetHGAggregation, AdaptiveAggregation,
+                              myAttentionCostAggregation,
+                              FeatureShrinkModule)  # myDiagAggregation, myBranchDiagAggregation
 from nets.estimation import DisparityEstimation
 from nets.refinement import StereoNetRefinement, StereoDRNetRefinement, HourglassRefinement
 
@@ -16,7 +18,7 @@ class AANet(nn.Module):
     def __init__(self, max_disp,
                  useFeatureAtt,
                  num_downsample=2,
-                 feature_type='aanet',
+                 feature_type='ganet',  # 'aanet',
                  no_feature_mdconv=False,
                  feature_pyramid=False,
                  feature_pyramid_network=False,
@@ -58,10 +60,6 @@ class AANet(nn.Module):
             # 只有AANetFeature直接返回的是三个尺度的特征。
             self.feature_extractor = AANetFeature(feature_mdconv=(not no_feature_mdconv))
             self.max_disp = max_disp // 3
-        # elif feature_type == 'attention_aanet':
-        #     self.feature_extractor = myRawFeature()
-        #     self.max_disp = max_disp // 4
-        #     self.attentionBlocks = myAttentionBlock(in_channels=512, key_channels=256, value_channels=512)
         else:
             raise NotImplementedError
 
@@ -69,18 +67,14 @@ class AANet(nn.Module):
         # 情形1：self.feature_extractor输出三尺度的特征：上采样和下采样同尺度间融合，输出仍是三尺度的特征。
         if feature_pyramid_network:
             if feature_type == 'aanet':
-                in_channels = [32 * 4, 32 * 8, 32 * 16, ]
+                in_channels = [32 * 4, 32 * 8, 32 * 16, ]  # 输入通道数分别为：128, 256, 512
             else:
                 in_channels = [32, 64, 128]
             self.fpn = FeaturePyramidNetwork(in_channels=in_channels,
-                                             out_channels=32 * 4)
-            featureAttentionInChl = [128, 128, 128]
+                                             out_channels=32 * 4)  # 输出通道数统一为：128, 128, 128
         # 情形2：self.feature_extractor输出的是一个尺度的特征：需要生成三个尺度的特征。
         elif feature_pyramid:
             self.fpn = FeaturePyrmaid()
-            featureAttentionInChl = [32, 64, 128]
-
-        self.multiScaleAttention = multiScaleAttention(featureAttentionInChl) if useFeatureAtt else None
 
         # Cost volume construction
         # 情形1：多个尺度的特征
@@ -116,6 +110,19 @@ class AANet(nn.Module):
             self.aggregation = GCNetAggregation()
         elif aggregation_type == 'stereonet':
             self.aggregation = StereoNetAggregation(in_channels=in_channels)
+        elif aggregation_type == 'AttentionCostAggregation':
+            # self.aggregation = myDiagAggregation(max_disp=max_disp)
+            # self.aggregation = myBranchDiagAggregation(max_disp=max_disp)
+            self.aggregation = myAttentionCostAggregation(max_disp=max_disp,
+                                                          num_scales=num_scales,
+                                                          num_fusions=num_fusions,
+                                                          num_stage_blocks=num_stage_blocks,
+                                                          num_deform_blocks=num_deform_blocks,
+                                                          mdconv_dilation=mdconv_dilation,
+                                                          deformable_groups=deformable_groups,
+                                                          intermediate_supervision=not no_intermediate_supervision)
+            self.FeatureShrink = FeatureShrinkModule(num_scales=num_scales)
+
         else:
             raise NotImplementedError
 
@@ -147,19 +154,10 @@ class AANet(nn.Module):
                 raise NotImplementedError
 
     def feature_extraction(self, img):
-        feature = self.feature_extractor(img)
+        feature = self.feature_extractor(img)  # H/3, H/6, H/12, 通道数分别为：128, 256, 512
         if self.feature_pyramid_network or self.feature_pyramid:
             feature = self.fpn(feature)
-        return feature
-
-    def doAttention(self, left_feature, right_feature):
-        """
-        left_feature,right_feature都是三个尺度，尺度之间相差1/2：高分辨率->低分辨率
-        """
-        if self.multiScaleAttention is not None:
-            left_feature, right_feature = self.multiScaleAttention(left_feature, right_feature)
-
-        return left_feature, right_feature
+        return feature  # H/3, H/6, H/12, 统一都为：128, 128, 128
 
     def cost_volume_construction(self, left_feature, right_feature):
         cost_volume = self.cost_volume(left_feature, right_feature)
@@ -228,15 +226,18 @@ class AANet(nn.Module):
         return disparity_pyramid
 
     def forward(self, left_img, right_img):
-        left_feature = self.feature_extraction(left_img)
+        left_feature = self.feature_extraction(left_img)  # H/3,H/6,H/12, 通道数分别为：128,256,512
         right_feature = self.feature_extraction(right_img)
 
-        left_feature, right_feature = self.doAttention(left_feature, right_feature)  # H/3, H/6, H/12
+        # 返回三个尺度的代价体：H/3, H/6, H/12. 可能是3D代价体或者4D代价体
+        cost_volume = self.cost_volume_construction(left_feature, right_feature)
 
-        cost_volume = self.cost_volume_construction(left_feature, right_feature)  # 返回三个尺度的代价体：H/3, H/6, H/12. 可能是3D代价体或者4D代价体
-        aggregation = self.aggregation(cost_volume)
+        # 降维后的左右图特征向量，以左图为例：[[尺度1：query,key],[尺度2：query,key],[尺度3：query,key]]
+        lft_reduced_feature, rht_reduced_feature = self.FeatureShrink(left_feature, right_feature)
+
+        aggregation = self.aggregation(cost_volume, lft_reduced_feature, rht_reduced_feature)  # myAttentionCostAggregation
 
         disparity_pyramid = self.disparity_computation(aggregation)  # H/12, H/6, H/3
         disparity_pyramid += self.disparity_refinement(left_img, right_img,
-                                                       disparity_pyramid[-1])
-        return disparity_pyramid  # H/12, H/6, H/3, H/2, H: 其中H/2, H分辨率的视差图，是从H/3进行视差精确化得到的。
+                                                       disparity_pyramid[-1])  # H/3 -> H/2,H/3
+        return disparity_pyramid  # H/3, H/2, H: 其中H/2, H分辨率的视差图，是从H/3进行视差精确化得到的。

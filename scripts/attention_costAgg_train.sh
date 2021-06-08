@@ -9,12 +9,12 @@ python train.py \
 --mode val \
 --debug_overFit_train 2 \
 --useFeatureAtt 1 \
---max_epoch 64 \
---milestones 20,30,40,50,60 \
+--max_epoch 100 \
+--milestones 20,30,40,50,60,70,80 \
 --data_dir data/SceneFlow \
---checkpoint_dir checkpoints/attention_aanet_train_sceneflow \
+--checkpoint_dir checkpoints/attention_costAgg_sceneflow \
 --accumulation_steps 1 \
---batch_size 4 \
+--batch_size 6 \
 --val_batch_size 1 \
 --img_height 288 \
 --img_width 576 \

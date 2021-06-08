@@ -16,7 +16,7 @@ class StereoDataset(Dataset):
                  debug_overFit_train,
                  dataset_name='SceneFlow',
                  mode='train',
-                 save_filename=False,
+                 save_filename=True, #False,
                  load_pseudo_gt=False,
                  transform=None):
         super(StereoDataset, self).__init__()
@@ -27,8 +27,18 @@ class StereoDataset(Dataset):
         self.save_filename = save_filename
         self.transform = transform
 
-        # 0: debug; 1: overFit; 2: Train
-        tasks = {0: "filenames_debug", 1: "fileNames_overfit", 2: "filenames"}
+        #        0: debug
+        tasks = {0: "filenames_debug",
+                 # 1: overFit
+                 1: "fileNames_overfit",
+                 # 1x: 子集训练
+                 1_1200: "fileNames_subsetTrain_1200",
+                 1_2400: "fileNames_subsetTrain_2400",
+                 1_4800: "filenames_subsetTrain_4800",
+                 1_9600: "filenames_subsetTrain_9600",
+                 1_19200: "filenames_subsetTrain_19200",
+                 # 2: Train使用全量的训练集
+                 2: "filenames"}
         nameFileDir = tasks[debug_overFit_train]
 
         sceneflow_finalpass_dict = {
@@ -81,7 +91,8 @@ class StereoDataset(Dataset):
             sample = dict()
 
             if self.save_filename:
-                sample['left_name'] = left_img.split('/', 1)[1]  # left_img.split('/', 1)即以'/'为分隔符，分割一次（即分割成两部分）
+                # sample['left_name'] = left_img.split('/', 1)[1]  # left_img.split('/', 1)即以'/'为分隔符，分割一次（即分割成两部分）
+                sample['left_name'] = left_img
 
             sample['left'] = os.path.join(data_dir, left_img)
             sample['right'] = os.path.join(data_dir, right_img)
@@ -134,8 +145,8 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 def getDataLoader(args, logger):
     # Train loader
-    # # 0:debug;  1:overFit;  2:Train
-    if args.debug_overFit_train in [0, 2]:
+    # # 0:debug;  1:overFit;  11:在数据子集上训练； 2:Train
+    if args.debug_overFit_train in [0, 1_1200, 1_2400, 1_1200, 1_4800, 1_9600, 1_19200, 2]:
         train_transform_list = [transforms.RandomCrop(args.img_height, args.img_width),
                                 transforms.RandomColor(),
                                 transforms.RandomVerticalFlip(),

@@ -27,11 +27,11 @@ class ToTensor(object):
 
         # disp = np.expand_dims(sample['disp'], axis=0)  # [1, H, W]
         if 'disp' in sample.keys():
-            disp = sample['disp']     # [H, W]
+            disp = sample['disp']  # [H, W]
             sample['disp'] = torch.from_numpy(disp)
 
         if 'pseudo_disp' in sample.keys():
-            disp = sample['pseudo_disp']     # [H, W]
+            disp = sample['pseudo_disp']  # [H, W]
             sample['pseudo_disp'] = torch.from_numpy(disp)
 
         return sample
@@ -69,6 +69,13 @@ class RandomCrop(object):
             right_pad = self.img_width - ori_width
 
             assert top_pad >= 0 and right_pad >= 0
+
+            # sample['left'] = np.lib.pad(sample['left'],
+            #                             ((top_pad, 0), (0, right_pad), (0, 0)),
+            #                             mode='symmetric')
+            # sample['right'] = np.lib.pad(sample['right'],
+            #                              ((top_pad, 0), (0, right_pad), (0, 0)),
+            #                              mode='symmetric')
 
             sample['left'] = np.lib.pad(sample['left'],
                                         ((top_pad, 0), (0, right_pad), (0, 0)),

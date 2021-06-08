@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn import Softmax
 
 from nets.deform import SimpleBottleneck, DeformSimpleBottleneck
 
@@ -412,7 +413,7 @@ class AdaptiveAggregation(nn.Module):
                  mdconv_dilation=2):
         super(AdaptiveAggregation, self).__init__()
 
-        self.max_disp = max_disp
+        self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
         self.num_fusions = num_fusions
         self.intermediate_supervision = intermediate_supervision
@@ -462,3 +463,394 @@ class AdaptiveAggregation(nn.Module):
             out = out + [self.final_conv[i](cost_volume[i])]
 
         return out
+
+
+# 尝试用对角线卷积做代价聚合
+class myAttentionCostAggregation(nn.Module):
+    def __init__(self, max_disp, num_scales=3, num_fusions=2,  # 共多少级处理
+                 num_stage_blocks=1,
+                 num_deform_blocks=2,  # 在num_fusions级中，共有多少个是特殊模块（Attention代价聚合）
+                 intermediate_supervision=True,
+                 deformable_groups=2,
+                 mdconv_dilation=2):
+        super(myAttentionCostAggregation, self).__init__()
+        # 在这里调节参数
+        num_scales = 3
+        num_fusions = 2         # 共多少级处理
+        num_stage_blocks = 1
+        num_deform_blocks = 2  # 在num_fusions级中，共有多少个是特殊模块（Attention代价聚合）
+        intermediate_supervision = True
+        deformable_groups = 2  # 无用参数
+        mdconv_dilation = 2    # 无用参数
+
+        self.max_disp = max_disp  # 最高分辨率代价体的最大视差
+        self.num_scales = num_scales
+        self.num_fusions = num_fusions  # 共多少级处理
+        self.intermediate_supervision = intermediate_supervision
+
+        fusions = nn.ModuleList()
+        for i in range(num_fusions):
+            # 共使用num_fusions级处理，其中最后三个使用了变形卷积
+            if self.intermediate_supervision:
+                num_out_branches = self.num_scales
+            else:
+                num_out_branches = 1 if i == num_fusions - 1 else self.num_scales
+
+            if i >= num_fusions - num_deform_blocks:
+                simple_bottleneck_module = False  # num_fusions级处理中，最后的num_deform_blocks即使用特殊处理（Attention）
+            else:
+                simple_bottleneck_module = True
+
+            fusions.append(myAttentionCostAggModule(num_scales=self.num_scales,
+                                                     num_output_branches=num_out_branches,
+                                                     max_disp=max_disp,
+                                                     num_blocks=num_stage_blocks,
+                                                     mdconv_dilation=mdconv_dilation,
+                                                     deformable_groups=deformable_groups,
+                                                     simple_bottleneck=simple_bottleneck_module))
+
+        self.fusions = nn.Sequential(*fusions)
+
+        self.final_conv = nn.ModuleList()
+        for i in range(self.num_scales):
+            in_channels = max_disp // (2 ** i)
+
+            self.final_conv.append(nn.Conv2d(in_channels, max_disp // (2 ** i), kernel_size=1))
+
+            if not self.intermediate_supervision:
+                break
+
+    def forward(self, cost_volume, left_feature, right_feature=None):
+        # cost_volume[B, D, H, W]和left_feature[B, C, H, W]都是三尺度的3D代价体：H/3,H/6,H/12, D=64,32,16, C=128,128,128
+        assert isinstance(cost_volume, list)
+
+        # 把cost_volume和Feature送入第一个Attention聚合模块，并将结果送入第二个Attention聚合模块，依次类推。
+        for i in range(self.num_fusions):   # 共经过self.num_fusions级处理
+            fusion = self.fusions[i]
+            cost_volume = fusion(cost_volume, left_feature, right_feature)
+
+        # Make sure the final output is in the first position
+        out = []  # H/3, H/6, H/12
+        for i in range(len(self.final_conv)):
+            out = out + [self.final_conv[i](cost_volume[i])]
+
+        return out
+
+
+# 使用Attention进行代价聚合：在这里真正发生
+class myAttentionCostAggModule(nn.Module):
+    def __init__(self, num_scales, num_output_branches, max_disp,
+                 num_blocks=1,
+                 simple_bottleneck=False,
+                 deformable_groups=2,
+                 mdconv_dilation=2):
+        super(myAttentionCostAggModule, self).__init__()
+
+        self.num_scales = num_scales
+        self.max_disp = max_disp
+        self.num_blocks = num_blocks
+        self.num_output_branches = num_output_branches
+        self.feature_channels = [128, 128, 128]  # 特征的通道数
+
+        # 基于Attention的尺度内代价聚合
+        self.branches = nn.ModuleList()            # 一个尺度，一个branch
+        for i in range(self.num_scales):
+            disp_candidates = max_disp // (2 ** i)  # 本尺度下的视差范围
+            branch = nn.ModuleList()               # 本尺度下的处理流程
+            for j in range(self.num_blocks):       # 本尺度下的处理流程，包含多少个Block
+                if simple_bottleneck:
+                    # Attention代价聚合模块
+                    branch.append(feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
+                else:
+                    # Attention代价聚合模块
+                    branch.append(feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
+
+            self.branches.append(nn.Sequential(*branch))  # 一个尺度，一个branch
+
+        # 尺度间代价聚合
+        # 尺度间代价体上下采样，并融合
+        # [尺度i,尺度j]，数值越小，分辨率越高。如下的上下采样操作，都是为了把尺度j的代价体，变成和尺度i一致！！！
+        self.fuse_layers = nn.ModuleList()           # （一个输出分支）一个尺度，一个fuse_layer
+        for i in range(self.num_output_branches):    # 遍历所有的（输出分支）输出尺度：[尺度i,*]
+            self.fuse_layers.append(nn.ModuleList())
+            # For each branch (different scale)
+            for j in range(self.num_scales):         # 遍历所有的（输出分支）输出尺度,形成尺度对：[尺度i,尺度j]
+                if i == j:
+                    # 同一尺度：尺度i = 尺度j, 无需上下采样，identity即可
+                    # Identity
+                    self.fuse_layers[-1].append(nn.Identity())
+                elif i < j:
+                    # 尺度i分辨率 > 尺度j分辨率, 需对尺度j代价体上采样（插值），故先对尺度j卷积一下
+                    self.fuse_layers[-1].append(
+                        nn.Sequential(nn.Conv2d(max_disp // (2 ** j), max_disp // (2 ** i),
+                                                kernel_size=1, bias=False),
+                                      nn.BatchNorm2d(max_disp // (2 ** i)),
+                                      ))
+                elif i > j:
+                    # 尺度i分辨率 < 尺度j分辨率, 需对尺度j代价体下采样，
+                    # 故对j代价体进行“卷积下采样”（ij相差两个以上的尺度则使用LeakyReLU，否则不使用LeakyReLU）
+                    layers = nn.ModuleList()
+                    for k in range(i - j - 1):
+                        layers.append(nn.Sequential(nn.Conv2d(max_disp // (2 ** j), max_disp // (2 ** j),
+                                                              kernel_size=3, stride=2, padding=1, bias=False),
+                                                    nn.BatchNorm2d(max_disp // (2 ** j)),
+                                                    nn.LeakyReLU(0.2, inplace=True),
+                                                    ))
+
+                    layers.append(nn.Sequential(nn.Conv2d(max_disp // (2 ** j), max_disp // (2 ** i),
+                                                          kernel_size=3, stride=2, padding=1, bias=False),
+                                                nn.BatchNorm2d(max_disp // (2 ** i))))
+                    self.fuse_layers[-1].append(nn.Sequential(*layers))
+
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
+
+    def forward(self, cost_volume, left_feature, right_feature=None):
+        # cost_volume: list, 三个尺度的代价体, H/3, H/6, H/12, 通道数(视差维度)分别为：D=64,32,16
+        # left_feature：list, 三个尺度的特征, H/3, H/6, H/12, 通道数都为128
+        assert len(self.branches) == len(cost_volume) and len(cost_volume) == len(left_feature)
+
+        # 基于Attention的尺度内代价聚合: 一个尺度，一个branch
+        for i in range(len(self.branches)):
+            branch = self.branches[i]          # 当前尺度i的branch
+            for j in range(self.num_blocks):
+                dconv = branch[j]              # 当前branch的流程块
+                cost_volume[i] = dconv(cost_volume[i], left_feature[i])  # cost_volume, left_feature, right_feature=None
+
+        if self.num_scales == 1:  # without fusions
+            return cost_volume
+
+        x_fused = []                              # 一个尺度的输出是x_fused的一个元素
+        for i in range(len(self.fuse_layers)):    # 遍历所有的（输出分支）输出尺度：[尺度i,*]
+            for j in range(len(self.branches)):   # 遍历所有的（输出分支）输出尺度,形成尺度对：[尺度i,尺度j],数值越小，分辨率越高
+                if j == 0:
+                    x_fused.append(self.fuse_layers[i][0](cost_volume[0]))
+                else:
+                    exchange = self.fuse_layers[i][j](cost_volume[j])
+                    if exchange.size()[2:] != x_fused[i].size()[2:]:
+                        exchange = F.interpolate(exchange, size=x_fused[i].size()[2:],
+                                                 mode='bilinear', align_corners=False)
+                    x_fused[i] = x_fused[i] + exchange
+
+        for i in range(len(x_fused)):
+            x_fused[i] = self.relu(x_fused[i])
+
+        return x_fused
+
+
+class feature_Attention_CostAgg_Module(nn.Module):
+    def __init__(self, feature_channels, disp_candidates, recurrence=2):
+        super(feature_Attention_CostAgg_Module, self).__init__()
+
+        # TODO: 在此处调节递归Attention的递归次数
+        self.recurrence = recurrence
+
+        # 对代价体的卷积
+        self.conva = nn.Sequential(nn.Conv2d(disp_candidates, disp_candidates, kernel_size=3, padding=1, bias=False),
+                                   nn.BatchNorm2d(disp_candidates))
+
+        self.cca = CostAgg_CrissCrossAttention(feature_channels, disp_candidates)
+
+        # 对代价体的卷积
+        self.convb = nn.Sequential(nn.Conv2d(disp_candidates, disp_candidates, kernel_size=3, padding=1, bias=False),
+                                   nn.BatchNorm2d(disp_candidates))
+
+    def forward(self, cost_volume, left_feature, right_feature=None):
+        # cost_volume: 单尺度代价体
+        # left_feature：单尺度特征
+        output = self.conva(cost_volume)
+
+        for i in range(self.recurrence):
+            output = self.cca(output, left_feature, right_feature)
+        output = self.convb(output)
+
+        return output
+
+
+# class CrissCrossAttention(nn.Module):
+#     """ Criss-Cross Attention Module"""
+#     def __init__(self, in_chs):
+#         super(CrissCrossAttention,self).__init__()
+#         self.chanel_in = in_chs
+#         self.query_conv = nn.Conv2d(in_channels = in_chs, out_channels = in_chs // 8, kernel_size=1)
+#         self.key_conv = nn.Conv2d(in_channels = in_chs, out_channels = in_chs // 8, kernel_size= 1)
+#         self.value_conv = nn.Conv2d(in_channels = in_chs, out_channels = in_chs, kernel_size= 1)
+#
+#         self.gamma = nn.Parameter(torch.zeros(1))
+#
+#     def forward(self,x):
+#         proj_query = self.query_conv(x)
+#         proj_key = self.key_conv(x)
+#         proj_value = self.value_conv(x)
+#
+#
+#         energy = ca_weight(proj_query, proj_key)
+#         attention = F.softmax(energy, 1)
+#         out = ca_map(attention, proj_value)
+#         out = self.gamma*out + x
+#
+#         return out
+
+
+def INF(B,H,W):
+    # [H] -> [H, H]->[1, H, H] -> [BW, H, H]
+    return -torch.diag(torch.tensor(float("inf")).cuda().repeat(H),0).unsqueeze(0).repeat(B*W,1,1)
+
+
+class FeatureShrinkModule(nn.Module):
+    """
+    给用于计算Attention的Feature降维，
+    防止出现带着大体积的Feature进Forward的情况，减少显存占用
+    """
+    def __init__(self, num_scales=3):
+        super(FeatureShrinkModule, self).__init__()
+
+        self.in_channels = [128, 128, 128]  # AANet的特征提取模块，固定为128通道
+        self.num_scales = num_scales
+        # TODO: 在此处调节Attention的通道数 # 通道数需要调节：f_qurey_chls//8??
+        self.query_channels = [32, 32, 32]
+
+        self.query_conv_s = nn.ModuleList()
+        self.key_conv_s = nn.ModuleList()
+        for i in range(self.num_scales):
+            self.query_conv_s.append(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1))
+            self.key_conv_s.append(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1))
+
+    def forward(self, left_feature, right_feature=None):
+
+        lft_rslt = []
+        right_rlst = []
+        for i in range(self.num_scales):
+            left = []
+            left.append(self.query_conv_s[i](left_feature[i]))
+            left.append(self.key_conv_s[i](left_feature[i]))
+            lft_rslt.append(left)
+
+            right = []
+            right.append(self.query_conv_s[i](right_feature[i]))
+            right.append(self.key_conv_s[i](right_feature[i]))
+            right_rlst.append(right)
+
+        # 降维后的左右图特征向量，以左图为例：[[尺度1：query,key],[尺度2：query,key],[尺度3：query,key]]
+        return lft_rslt, right_rlst
+
+
+
+class CostAgg_CrissCrossAttention(nn.Module):
+    """ Criss-Cross Attention Module"""
+    def __init__(self, f_qurey_chls, value_chls):
+        super(CostAgg_CrissCrossAttention, self).__init__()
+
+        # 通道数需要调节：f_qurey_chls//8??
+        # self.query_conv = nn.Conv2d(in_channels=f_qurey_chls, out_channels=f_qurey_chls // 4, kernel_size=1)
+        # self.key_conv = nn.Conv2d(in_channels=f_qurey_chls, out_channels=f_qurey_chls // 4, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels=value_chls, out_channels=value_chls, kernel_size=1)
+
+        self.softmax = nn.Softmax(dim=3)
+        self.INF = INF
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, cost_volume, left_feature, right_feature=None):
+        # [B, C, H, W]
+        m_batchsize, _, height, width = cost_volume.size()
+
+        # proj_query = self.query_conv(left_feature)
+        proj_query = left_feature[0]
+        # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H] -> [BW, H, C]
+        proj_query_H = proj_query.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height).permute(0, 2, 1)
+        # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W] -> [BH, W, C]
+        proj_query_W = proj_query.permute(0,2,1,3).contiguous().view(m_batchsize*height,-1,width).permute(0, 2, 1)
+
+        # proj_key = self.key_conv(left_feature)
+        proj_key = left_feature[1]
+        # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H]
+        proj_key_H = proj_key.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height)
+        # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W]
+        proj_key_W = proj_key.permute(0,2,1,3).contiguous().view(m_batchsize*height,-1,width)
+
+        proj_value = self.value_conv(cost_volume)
+        # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H]
+        proj_value_H = proj_value.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height)
+        # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W]
+        proj_value_W = proj_value.permute(0,2,1,3).contiguous().view(m_batchsize*height,-1,width)
+
+        # 负无穷的作用是：十字交叉Attention对于像素与其自身会计算两层Attention，故需去掉一个。加上负无穷，在Softmax的时候，其权重就会变成0.
+        # [BW, H, C] * [BW, C, H] = [BW, H, H]: H维度（垂直方向）上的像素之间的Attention  + [BW, H, H]对角负无穷矩阵  -> [B, H, W, H]
+        energy_H = (torch.bmm(proj_query_H, proj_key_H) + self.INF(m_batchsize, height, width)).view(
+                                                                # [BW, H, H] -> [B, W, H, H] -> [B, H, W, H]
+                                                                m_batchsize, width, height, height).permute(0, 2, 1, 3)
+        # [BH, W, C] * [BH, C, W] = [BH, W, W] -> [B, H, W, W]
+        energy_W = torch.bmm(proj_query_W, proj_key_W).view(m_batchsize,height,width,width)
+        # [B, H, W, H] || [B, H, W, W] -> [B, H, W, H+W] -> 在最后一维上做Softmax
+        concate = self.softmax(torch.cat([energy_H, energy_W], 3))
+
+        # [B, H, W, H + W]取出[B, H, W, 0:H]->[B, W, H, H]-> [BW, H, H]
+        att_H = concate[:,:,:,0:height].permute(0,2,1,3).contiguous().view(m_batchsize*width,height,height)
+        # [B, H, W, H + W]取出[B, H, W, H : W+H]->[BH, W, W]
+        att_W = concate[:,:,:,height:height+width].contiguous().view(m_batchsize*height,width,width)
+
+        # value[BW, C, H] * (Attention[BW, H, H]->[BW, H, H]) -> [B, W, C, H]-> [B, C, H, W]
+        out_H = torch.bmm(proj_value_H, att_H.permute(0, 2, 1)).view(m_batchsize,width,-1,height).permute(0,2,3,1)
+        # value[BH, C, W] * (Attention[BH, W, W]->[BH, W, W]) -> [B, H, C, W]-> [B, C, H, W]
+        out_W = torch.bmm(proj_value_W, att_W.permute(0, 2, 1)).view(m_batchsize,height,-1,width).permute(0,2,1,3)
+        #print(out_H.size(),out_W.size())
+        return self.gamma * (out_H + out_W) + cost_volume
+
+
+
+# class CrissCrossAttention_PurePython(nn.Module):
+#     """ Criss-Cross Attention Module"""
+#     def __init__(self, in_dim):
+#         super(CrissCrossAttention_PurePython,self).__init__()
+#         self.query_conv = nn.Conv2d(in_channels=in_dim, out_channels=in_dim//8, kernel_size=1)
+#         self.key_conv = nn.Conv2d(in_channels=in_dim, out_channels=in_dim//8, kernel_size=1)
+#         self.value_conv = nn.Conv2d(in_channels=in_dim, out_channels=in_dim, kernel_size=1)
+#
+#         self.softmax = nn.Softmax(dim=3)
+#         self.INF = INF
+#         self.gamma = nn.Parameter(torch.zeros(1))
+#
+#     def forward(self, x):
+#         # [B, C, H, W]
+#         m_batchsize, _, height, width = x.size()
+#
+#         proj_query = self.query_conv(x)
+#         # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H] -> [BW, H, C]
+#         proj_query_H = proj_query.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height).permute(0, 2, 1)
+#         # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W] -> [BH, W, C]
+#         proj_query_W = proj_query.permute(0,2,1,3).contiguous().view(m_batchsize*height,-1,width).permute(0, 2, 1)
+#
+#         proj_key = self.key_conv(x)
+#         # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H]
+#         proj_key_H = proj_key.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height)
+#         # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W]
+#         proj_key_W = proj_key.permute(0,2,1,3).contiguous().view(m_batchsize*height,-1,width)
+#
+#         proj_value = self.value_conv(x)
+#         # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H]
+#         proj_value_H = proj_value.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height)
+#         # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W]
+#         proj_value_W = proj_value.permute(0,2,1,3).contiguous().view(m_batchsize*height,-1,width)
+#
+#         # 负无穷的作用是：十字交叉Attention对于像素与其自身会计算两层Attention，故需去掉一个。加上负无穷，在Softmax的时候，其权重就会变成0.
+#         # [BW, H, C] * [BW, C, H] = [BW, H, H]: H维度（垂直方向）上的像素之间的Attention  + [BW, H, H]对角负无穷矩阵  -> [B, H, W, H]
+#         energy_H = (torch.bmm(proj_query_H, proj_key_H) + self.INF(m_batchsize, height, width)).view(
+#                                                                 # [BW, H, H] -> [B, W, H, H] -> [B, H, W, H]
+#                                                                 m_batchsize, width, height, height).permute(0, 2, 1, 3)
+#         # [BH, W, C] * [BH, C, W] = [BH, W, W] -> [B, H, W, W]
+#         energy_W = torch.bmm(proj_query_W, proj_key_W).view(m_batchsize,height,width,width)
+#         # [B, H, W, H] || [B, H, W, W] -> [B, H, W, H+W] -> 在最后一维上做Softmax
+#         concate = self.softmax(torch.cat([energy_H, energy_W], 3))
+#
+#         # [B, H, W, H + W]取出[B, H, W, 0:H]->[B, W, H, H]-> [BW, H, H]
+#         att_H = concate[:,:,:,0:height].permute(0,2,1,3).contiguous().view(m_batchsize*width,height,height)
+#         # [B, H, W, H + W]取出[B, H, W, H : W+H]->[BH, W, W]
+#         att_W = concate[:,:,:,height:height+width].contiguous().view(m_batchsize*height,width,width)
+#
+#
+#         # value[BW, C, H] * (Attention[BW, H, H]->[BW, H, H]) -> [B, W, C, H]-> [B, C, H, W]
+#         out_H = torch.bmm(proj_value_H, att_H.permute(0, 2, 1)).view(m_batchsize,width,-1,height).permute(0,2,3,1)
+#         # value[BH, C, W] * (Attention[BH, W, W]->[BH, W, W]) -> [B, H, C, W]-> [B, C, H, W]
+#         out_W = torch.bmm(proj_value_W, att_W.permute(0, 2, 1)).view(m_batchsize,height,-1,width).permute(0,2,1,3)
+#         #print(out_H.size(),out_W.size())
+#         return self.gamma*(out_H + out_W) + x
+

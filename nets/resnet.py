@@ -191,4 +191,4 @@ class AANetFeature(nn.Module):
         layer2 = self.layer2(layer1)
         layer3 = self.layer3(layer2)
 
-        return [layer1, layer2, layer3]  # H/3，H/6，H/12
+        return [layer1, layer2, layer3]  # H/3，H/6，H/12, 通道数分别为：128,256,512

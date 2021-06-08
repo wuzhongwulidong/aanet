@@ -13,6 +13,7 @@ from dataloader import transforms
 from dataloader.dataloader import getDataLoader
 from utils import utils
 import model
+from utils.utilsForMatlab import getLossRecord, save_loss_for_matlab
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
@@ -58,7 +59,7 @@ parser.add_argument('--feature_pyramid_network', action='store_true', help='Use 
 parser.add_argument('--feature_similarity', default='correlation', type=str,
                     help='Similarity measure for matching cost')
 parser.add_argument('--num_downsample', default=2, type=int, help='Number of downsample layer for feature extraction')
-parser.add_argument('--aggregation_type', default='adaptive', type=str, help='Type of cost aggregation')
+parser.add_argument('--aggregation_type', default='AttentionCostAggregation', type=str, help='Type of cost aggregation')
 parser.add_argument('--num_scales', default=3, type=int, help='Number of stages when using parallel aggregation')
 parser.add_argument('--num_fusions', default=6, type=int, help='Number of multi-scale fusions when using parallel'
                                                                'aggragetion')
@@ -132,6 +133,9 @@ if local_master:
     logger.info('[Info] used parameters: {}'.format(vars(args)))
 
 torch.backends.cudnn.benchmark = True  # https://blog.csdn.net/byron123456sfsfsfa/article/details/96003317
+
+utils.check_path(args.checkpoint_dir)
+utils.save_args(args) if local_master else None
 
 filename = 'command_test.txt' if args.mode == 'test' else 'command_train.txt'
 utils.save_command(args.checkpoint_dir, filename) if local_master else None
@@ -232,6 +236,7 @@ def main():
                                                                 milestones=milestones,
                                                                 gamma=args.lr_decay_gamma,
                                                                 last_epoch=last_epoch)  # 最后这个last_epoch参数很重要：如果是resume的话，则会自动调整学习率适去应last_epoch。
+            logger.info('=>lr_scheduler.get_lr():{}'.format(lr_scheduler.state_dict()))
         else:
             raise NotImplementedError
     # model.Model(object)对AANet做了进一步封装。
@@ -240,9 +245,13 @@ def main():
 
     logger.info('=> Start training...')
 
+    trainLoss_dict, trainLossKey, valLoss_dict, valLossKey = getLossRecord(netName="AANet")
+
     if args.evaluate_only:
         assert args.val_batch_size == 1
-        train_model.validate(val_loader, local_master)  # test模式。应该设置--evaluate_only，且--mode为“test”。
+        train_model.validate(val_loader, local_master, valLoss_dict, valLossKey)  # test模式。应该设置--evaluate_only，且--mode为“test”。
+        # 保存Loss用于分析
+        save_loss_for_matlab(trainLoss_dict, valLoss_dict)
     else:
         for epoch in range(start_epoch, args.max_epoch):  # 训练主循环（Epochs）！！！
             if not args.evaluate_only:
@@ -251,11 +260,14 @@ def main():
                 if args.distributed:
                     train_loader.sampler.set_epoch(epoch)
                     logger.info('train_loader.sampler.set_epoch({})'.format(epoch))
-                train_model.train(train_loader, local_master)
-            if not args.no_validate:
-                train_model.validate(val_loader, local_master)  # 训练模式下：边训练边验证。
+                train_model.train(train_loader, local_master, trainLoss_dict, trainLossKey)
+            if not args.no_validate and args.debug_overFit_train != 1:  # 且不是overFit模式
+                train_model.validate(val_loader, local_master, valLoss_dict, valLossKey)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
                 lr_scheduler.step()  # 调整Learning Rate
+
+            # 保存Loss用于分析。每个epoch结束后，都保存一次，覆盖之前的保存。避免必须训练完成才保存的弊端。
+            save_loss_for_matlab(trainLoss_dict, valLoss_dict)
 
         logger.info('=> End training\n\n')
 
