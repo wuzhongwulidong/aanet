@@ -476,12 +476,15 @@ class myAttentionCostAggregation(nn.Module):
         super(myAttentionCostAggregation, self).__init__()
         # 在这里调节参数
         num_scales = 3
-        num_fusions = 2         # 共多少级处理
         num_stage_blocks = 1
-        num_deform_blocks = 2  # 在num_fusions级中，共有多少个是特殊模块（Attention代价聚合）
         intermediate_supervision = True
-        deformable_groups = 2  # 无用参数
+        deformable_groups = 2
         mdconv_dilation = 2    # 无用参数
+
+        # 需要调节的参数
+        num_fusions = 4         # 共多少级处理
+        num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
+        num_attention_blocks = 2 # 在num_fusions级中，使用多少个Attention代价聚合模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
@@ -496,10 +499,13 @@ class myAttentionCostAggregation(nn.Module):
             else:
                 num_out_branches = 1 if i == num_fusions - 1 else self.num_scales
 
-            if i >= num_fusions - num_deform_blocks:
-                simple_bottleneck_module = False  # num_fusions级处理中，最后的num_deform_blocks即使用特殊处理（Attention）
+            # 1.Attention代价聚合。2.变形卷积
+            if i < num_attention_blocks:
+                # num_fusions级处理中，前面的num_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=1）
+                simple_bottleneck_module = 1
             else:
-                simple_bottleneck_module = True
+                # num_fusions级处理中，最后的num_deform_blocks级使用变形卷积（simple_bottleneck_module=2）
+                simple_bottleneck_module = 2
 
             fusions.append(myAttentionCostAggModule(num_scales=self.num_scales,
                                                      num_output_branches=num_out_branches,
@@ -541,7 +547,7 @@ class myAttentionCostAggregation(nn.Module):
 class myAttentionCostAggModule(nn.Module):
     def __init__(self, num_scales, num_output_branches, max_disp,
                  num_blocks=1,
-                 simple_bottleneck=False,
+                 simple_bottleneck=0,
                  deformable_groups=2,
                  mdconv_dilation=2):
         super(myAttentionCostAggModule, self).__init__()
@@ -550,7 +556,8 @@ class myAttentionCostAggModule(nn.Module):
         self.max_disp = max_disp
         self.num_blocks = num_blocks
         self.num_output_branches = num_output_branches
-        self.feature_channels = [128, 128, 128]  # 特征的通道数
+        self.feature_channels = [64, 48, 32]  # 特征的通道数: 已在进入代价聚合模块之前，进行了降维
+        self.simple_bottleneck = simple_bottleneck
 
         # 基于Attention的尺度内代价聚合
         self.branches = nn.ModuleList()            # 一个尺度，一个branch
@@ -558,12 +565,19 @@ class myAttentionCostAggModule(nn.Module):
             disp_candidates = max_disp // (2 ** i)  # 本尺度下的视差范围
             branch = nn.ModuleList()               # 本尺度下的处理流程
             for j in range(self.num_blocks):       # 本尺度下的处理流程，包含多少个Block
-                if simple_bottleneck:
+                # 1.Attention代价聚合。2.变形卷积
+                if simple_bottleneck == 1:
                     # Attention代价聚合模块
                     branch.append(feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
+                elif simple_bottleneck == 2:
+                    # 变形卷积代价聚合模块
+                    branch.append(DeformSimpleBottleneck(disp_candidates, disp_candidates, modulation=True,
+                                                         mdconv_dilation=mdconv_dilation,
+                                                         deformable_groups=deformable_groups))
+                    # branch.append(feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
+                    # branch.append(SimpleBottleneck(num_candidates, num_candidates))
                 else:
-                    # Attention代价聚合模块
-                    branch.append(feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
+                    raise NotImplementedError
 
             self.branches.append(nn.Sequential(*branch))  # 一个尺度，一个branch
 
@@ -614,7 +628,11 @@ class myAttentionCostAggModule(nn.Module):
             branch = self.branches[i]          # 当前尺度i的branch
             for j in range(self.num_blocks):
                 dconv = branch[j]              # 当前branch的流程块
-                cost_volume[i] = dconv(cost_volume[i], left_feature[i])  # cost_volume, left_feature, right_feature=None
+                # 1.Attention代价聚合。2.变形卷积
+                if self.simple_bottleneck == 1:
+                    cost_volume[i] = dconv(cost_volume[i], left_feature[i])  # cost_volume, left_feature, right_feature=None
+                elif self.simple_bottleneck == 2:
+                    cost_volume[i] = dconv(cost_volume[i])
 
         if self.num_scales == 1:  # without fusions
             return cost_volume
@@ -706,14 +724,18 @@ class FeatureShrinkModule(nn.Module):
 
         self.in_channels = [128, 128, 128]  # AANet的特征提取模块，固定为128通道
         self.num_scales = num_scales
-        # TODO: 在此处调节Attention的通道数 # 通道数需要调节：f_qurey_chls//8??
-        self.query_channels = [32, 32, 32]
+        # TODO: 在此处调节Attention的通道数, 目的是降低后续在计算Attention时计算量过大
+        self.query_channels = [64, 48, 32]
 
         self.query_conv_s = nn.ModuleList()
         self.key_conv_s = nn.ModuleList()
         for i in range(self.num_scales):
-            self.query_conv_s.append(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1))
-            self.key_conv_s.append(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1))
+            self.query_conv_s.append(nn.Sequential(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
+                                                   nn.BatchNorm2d(self.query_channels[i]),
+                                                   nn.ReLU(inplace=True)))
+            self.key_conv_s.append(nn.Sequential(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
+                                                 nn.BatchNorm2d(self.query_channels[i]),
+                                                 nn.ReLU(inplace=True)))
 
     def forward(self, left_feature, right_feature=None):
 
@@ -734,15 +756,14 @@ class FeatureShrinkModule(nn.Module):
         return lft_rslt, right_rlst
 
 
-
 class CostAgg_CrissCrossAttention(nn.Module):
     """ Criss-Cross Attention Module"""
     def __init__(self, f_qurey_chls, value_chls):
         super(CostAgg_CrissCrossAttention, self).__init__()
 
-        # 通道数需要调节：f_qurey_chls//8??
-        # self.query_conv = nn.Conv2d(in_channels=f_qurey_chls, out_channels=f_qurey_chls // 4, kernel_size=1)
-        # self.key_conv = nn.Conv2d(in_channels=f_qurey_chls, out_channels=f_qurey_chls // 4, kernel_size=1)
+        # 通道数需要调节：特征已在特征提取模块进行了降维
+        self.query_conv = nn.Conv2d(in_channels=f_qurey_chls, out_channels=f_qurey_chls, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels=f_qurey_chls, out_channels=f_qurey_chls, kernel_size=1)
         self.value_conv = nn.Conv2d(in_channels=value_chls, out_channels=value_chls, kernel_size=1)
 
         self.softmax = nn.Softmax(dim=3)
@@ -754,14 +775,14 @@ class CostAgg_CrissCrossAttention(nn.Module):
         m_batchsize, _, height, width = cost_volume.size()
 
         # proj_query = self.query_conv(left_feature)
-        proj_query = left_feature[0]
+        proj_query = self.query_conv(left_feature[0])
         # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H] -> [BW, H, C]
         proj_query_H = proj_query.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height).permute(0, 2, 1)
         # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W] -> [BH, W, C]
         proj_query_W = proj_query.permute(0,2,1,3).contiguous().view(m_batchsize*height,-1,width).permute(0, 2, 1)
 
         # proj_key = self.key_conv(left_feature)
-        proj_key = left_feature[1]
+        proj_key = self.key_conv(left_feature[1])
         # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H]
         proj_key_H = proj_key.permute(0,3,1,2).contiguous().view(m_batchsize*width,-1,height)
         # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W]
