@@ -32,6 +32,7 @@ class CostVolume(nn.Module):
             cost_volume = left_feature.new_zeros(b, 2 * c, self.max_disp, h, w)  # [B, 2C, D, H, W]
             for i in range(self.max_disp):
                 if i > 0:
+                    # [B, 2C, D, H, W]
                     cost_volume[:, :, i, :, i:] = torch.cat((left_feature[:, :, :, i:], right_feature[:, :, :, :-i]),
                                                             dim=1)
                 else:
@@ -42,6 +43,7 @@ class CostVolume(nn.Module):
 
             for i in range(self.max_disp):
                 if i > 0:
+                    # cost_volume:[B, D, H, W]
                     cost_volume[:, i, :, i:] = (left_feature[:, :, :, i:] *  # left_feature.shape=[B, C, H, W]
                                                 right_feature[:, :, :, :-i]).mean(dim=1)
                 else:
