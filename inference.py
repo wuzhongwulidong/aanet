@@ -23,6 +23,8 @@ parser.add_argument('--mode', default='test', type=str,
                     help='Validation mode on small subset or test mode on full test data')
 
 # Training data
+# 用于选择数据集：0: debug; 1: overFit; 2: Train
+parser.add_argument('--debug_overFit_train', default=2, type=int, help='use author original file name list Dir')
 parser.add_argument('--data_dir', default='data/SceneFlow',
                     type=str, help='Training dataset')
 parser.add_argument('--dataset_name', default='SceneFlow', type=str, help='Dataset name')
@@ -47,6 +49,8 @@ parser.add_argument('--feature_similarity', default='correlation', type=str,
                     help='Similarity measure for matching cost')
 parser.add_argument('--num_downsample', default=2, type=int, help='Number of downsample layer for feature extraction')
 parser.add_argument('--aggregation_type', default='adaptive', type=str, help='Type of cost aggregation')
+# useFeatureAtt参数已被废弃
+parser.add_argument('--useFeatureAtt', default=1, type=int, help='Whether to use Feature Attention: 1:use; 0:dont use')
 parser.add_argument('--num_scales', default=3, type=int, help='Number of stages when using parallel aggregation')
 parser.add_argument('--num_fusions', default=6, type=int, help='Number of multi-scale fusions when using parallel'
                                                                'aggragetion')
@@ -108,6 +112,7 @@ def main():
                        feature_pyramid_network=args.feature_pyramid_network,
                        feature_similarity=args.feature_similarity,
                        aggregation_type=args.aggregation_type,
+                       useFeatureAtt=args.useFeatureAtt,
                        num_scales=args.num_scales,
                        num_fusions=args.num_fusions,
                        num_stage_blocks=args.num_stage_blocks,
@@ -143,10 +148,10 @@ def main():
     print('=> %d samples found in the test set' % num_samples)
 
     for i, sample in enumerate(test_loader):
-        if args.count_time and i == args.num_images:  # testing time only
+        if args.count_time and i == args.num_images:  # testing time only, on args.num_images images.
             break
 
-        if i % 100 == 0:
+        if i % 20 == 0:
             print('=> Inferencing %d/%d' % (i, num_samples))
 
         left = sample['left'].to(device)  # [B, 3, H, W]

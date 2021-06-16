@@ -30,7 +30,7 @@ parser.add_argument('--data_dir', default='data/SceneFlow', type=str, help='Trai
 parser.add_argument('--dataset_name', default='SceneFlow', type=str, help='Dataset name')
 
 parser.add_argument('--batch_size', default=64, type=int, help='Batch size for training')
-parser.add_argument('--accumulation_steps', default=4, type=int, help='Batch size for training')
+parser.add_argument('--accumulation_steps', default=1, type=int, help='Batch size for training')
 parser.add_argument('--val_batch_size', default=64, type=int, help='Batch size for validation')
 parser.add_argument('--num_workers', default=8, type=int, help='Number of workers for data loading')
 parser.add_argument('--img_height', default=288, type=int, help='Image height for training')
@@ -109,6 +109,9 @@ if args.debug_overFit_train in [0, 2]:
 elif args.debug_overFit_train in [1]:
     args.print_freq = 10
     args.summary_freq = 50
+
+if args.dataset_name == 'KITTI2015':
+    args.print_freq = 20
 
 if args.distributed:
     #  尝试分布式训练
