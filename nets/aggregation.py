@@ -483,7 +483,7 @@ class myAttentionCostAggregation(nn.Module):
 
         # 需要调节的参数
         num_fusions = 4  # 共多少级处理
-        num_attention_blocks = 2  # 在num_fusions级中，使用多少个Attention代价聚合模块
+        num_attention_blocks = 1  # 在num_fusions级中，使用多少个Attention代价聚合模块
         num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
@@ -637,8 +637,8 @@ class myAttentionCostAggModule(nn.Module):
                 dconv = branch[j]  # 当前branch的流程块
                 # 1.Attention代价聚合。2.变形卷积
                 if self.simple_bottleneck == 1:
-                    cost_volume[i] = dconv(cost_volume[i],
-                                           left_feature[i])  # cost_volume, left_feature, right_feature=None
+                    # cost_volume, left_feature, right_feature=None
+                    cost_volume[i] = dconv(cost_volume[i], left_feature[i], right_feature[i])
                 elif self.simple_bottleneck == 2:
                     cost_volume[i] = dconv(cost_volume[i])
 
@@ -779,6 +779,7 @@ class FeatureShrinkModule(nn.Module):
                 nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                 nn.BatchNorm2d(self.query_channels[i]),
                 nn.ReLU(inplace=True)))
+            # nn.LeakyReLU(0.2, inplace=True)
             self.key_conv_s.append(nn.Sequential(
                 nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                 nn.BatchNorm2d(self.query_channels[i]),
@@ -807,7 +808,7 @@ class warp_feature_Attention_CostAgg_Module(nn.Module):
     def __init__(self, feature_channels, disp_candidates, recurrence=2):
         super(warp_feature_Attention_CostAgg_Module, self).__init__()
 
-        # TODO: 在此处调节递归Attention的递归次数
+        # TODO: 在此处调节递归Attention的递归次数, 默认为2
         self.recurrence = recurrence
 
         # 对代价体的卷积
@@ -832,13 +833,34 @@ class warp_feature_Attention_CostAgg_Module(nn.Module):
         return output
 
 
+def mix_features(left_key_feature, right_key_feature, feature_similarity, b, c, D_max, h, w):
+    # 1. warp right_key_feature
+    if feature_similarity == 'difference':
+        warped_right_key_features = right_key_feature.new_zeros(b, c, D_max, h, w)  # [B, C, D, H, W] D=192/3
+
+        for i in range(D_max):
+            if i > 0:
+                warped_right_key_features[:, :, i, :, i:] = right_key_feature[:, :, :, :-i]
+            else:
+                warped_right_key_features[:, :, i, :, :] = right_key_feature
+
+    # 2. feature_mix
+    # [B, C, D, H, W] + ([B, C, H, W] -> [B, C, 1, H, W]) -> [B, C, D, H, W]
+    # TODO：两者特征直接相加，经过Softmax之后就相当于相乘，貌似比较合理了。还有更好的方法吗？经过卷积？
+    mixed_features = warped_right_key_features + left_key_feature.unsqueeze(2)
+
+    return mixed_features
+
+
+
+
 class warp_CostAgg_CrissCrossAttention(nn.Module):
     """ Criss-Cross Attention Module"""
 
     def __init__(self, f_qurey_chls, value_chls):
         super(warp_CostAgg_CrissCrossAttention, self).__init__()
 
-        self.feature_similarity == 'difference'
+        self.feature_similarity = 'difference'
         self.value_chls = value_chls
 
         # 通道数需要调节：特征已在特征提取模块进行了降维
@@ -881,30 +903,18 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
         # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W]
         proj_value_W = proj_value.permute(0, 2, 1, 3).contiguous().view(b * h, -1, w)
 
-        # 1. warp right_key_feature
-        if self.feature_similarity == 'difference':
-            warped_right_key_features = right_key_feature.new_zeros(b, c, D_max, h, w)  # [B, C, D, H, W] D=192/3
-
-            for i in range(D_max):
-                if i > 0:
-                    warped_right_key_features[:, :, i, :, i:] = right_key_feature[:, :, :, :-i]
-                else:
-                    warped_right_key_features[:, :, i, :, :] = right_key_feature
-
-        # 2. feature_mix
-        # [B, C, D, H, W] + ([B, C, H, W] -> [B, C, 1, H, W]) -> [B, C, D, H, W]
-        # TODO：两者特征直接相加，经过Softmax之后就相当于相乘，貌似比较合理了。还有更好的方法吗？经过卷积？
-        mixed_features = warped_right_key_features + left_key_feature.unsqueeze(2)
+        mixed_features = mix_features(left_key_feature, right_key_feature, self.feature_similarity, b, c, D_max, h, w)
 
         # 3. 计算Attention
         for i in range(D_max):
+            print(i)
             # 3.1 针对每一个视差值, 计算Attention。因为不同的视差下，右特征图的warp偏移不一样。
             slice_feature = mixed_features[:, :, i, :, :]  # [B, C, D=i, H, W] ->[B, C, H, W]
             # mixed_proj_key = self.left_key_conv(slice_feature)
             # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H]
             mixed_proj_key_H = slice_feature.permute(0, 3, 1, 2).contiguous().view(b * w, -1, h)
             # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W]
-            mixed_proj_key_W = slice_feature.permute(0, 2, 1, 3).contiguous().view(b * w, -1, w)
+            mixed_proj_key_W = slice_feature.permute(0, 2, 1, 3).contiguous().view(b * h, -1, w)
 
             # 负无穷的作用是：十字交叉Attention对于像素与其自身会计算两层Attention，故需去掉一个。加上负无穷，在Softmax的时候，其权重就会变成0.
             # [BW, H, C] * [BW, C, H] = [BW, H, H]: H维度（垂直方向）上的像素之间的Attention  + [BW, H, H]对角负无穷矩阵  -> [B, H, W, H]
@@ -929,7 +939,7 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
 
             # 3.3 保存聚合后的代价体Slice
             # cost_volume[B, C/D=i, H, W]
-            cost_volume[:, i, :, :] = self.gammaList[i] * (out_H + out_W) + cost_volume[:, i, :, :]
+            cost_volume[:, i:i+1, :, :] = self.gammaList[i] * (out_H + out_W) + cost_volume[:, i:i+1, :, :]
 
         return cost_volume
 
