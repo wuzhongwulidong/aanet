@@ -482,9 +482,10 @@ class myAttentionCostAggregation(nn.Module):
         mdconv_dilation = 2  # 无用参数
 
         # 需要调节的参数
-        num_fusions = 4  # 共多少级处理
-        num_attention_blocks = 1  # 在num_fusions级中，使用多少个Attention代价聚合模块
-        num_deform_blocks = 3  # 在num_fusions级中，使用多少个变形卷积模块
+        num_fusions = 5  # 共多少级处理
+        num_warp_attention_blocks = 1  # 在num_fusions级中，使用多少个warp_Attention代价聚合模块
+        num_attention_blocks = 2 + num_warp_attention_blocks  # 在num_fusions级中，使用多少个Attention代价聚合模块
+        num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
@@ -499,8 +500,11 @@ class myAttentionCostAggregation(nn.Module):
             else:
                 num_out_branches = 1 if i == num_fusions - 1 else self.num_scales
 
-            # 1.Attention代价聚合。2.变形卷积
-            if i < num_attention_blocks:
+            # simple_bottleneck_module: 0.warp_attention, 1.Attention代价聚合。2.变形卷积
+            if i < num_warp_attention_blocks:
+                # num_fusions级处理中，前面的num_warp_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=1）
+                simple_bottleneck_module = 0
+            elif i < num_attention_blocks:
                 # num_fusions级处理中，前面的num_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=1）
                 simple_bottleneck_module = 1
             else:
@@ -570,12 +574,13 @@ class myAttentionCostAggModule(nn.Module):
             disp_candidates = max_disp // (2 ** i)  # 本尺度下的视差范围
             branch = nn.ModuleList()  # 本尺度下的处理流程
             for j in range(self.num_blocks):  # 本尺度下的处理流程，包含多少个Block
-                # 1.Attention代价聚合。2.变形卷积
-                if simple_bottleneck == 1:
-                    # Attention代价聚合模块: 不考虑A/C相似性
-                    # branch.append(feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
+                # simple_bottleneck_module: 0.warp_attention, 1.Attention代价聚合。2.变形卷积
+                if simple_bottleneck == 0:
                     # warp Attention代价聚合模块：考虑A/C相似性
                     branch.append(warp_feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
+                elif simple_bottleneck == 1:
+                    # Attention代价聚合模块: 不考虑A/C相似性
+                    branch.append(feature_Attention_CostAgg_Module(self.feature_channels[i], disp_candidates))
                 elif simple_bottleneck == 2:
                     # 变形卷积代价聚合模块
                     branch.append(DeformSimpleBottleneck(disp_candidates, disp_candidates, modulation=True,
