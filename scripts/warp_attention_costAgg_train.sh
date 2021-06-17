@@ -14,7 +14,7 @@ python train.py \
 --data_dir data/SceneFlow \
 --checkpoint_dir checkpoints/warp_attention_costAgg_sceneflow \
 --accumulation_steps 1 \
---batch_size 6 \
+--batch_size 4 \
 --val_batch_size 1 \
 --img_height 288 \
 --img_width 576 \

@@ -2,7 +2,7 @@
 echo '[Info] Please ensure that: conda env is Activated.'
 neededMem=11000
 neededGPUs=1
-targetShell='./scripts/attention_costAgg_train.sh'
+targetShell='./scripts/warp_attention_costAgg_train.sh'
 
 echo "neededMem=$neededMem MB"
 echo "neededGPUs=$neededGPUs"

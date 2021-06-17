@@ -484,7 +484,7 @@ class myAttentionCostAggregation(nn.Module):
         # 需要调节的参数
         num_fusions = 4  # 共多少级处理
         num_attention_blocks = 1  # 在num_fusions级中，使用多少个Attention代价聚合模块
-        num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
+        num_deform_blocks = 3  # 在num_fusions级中，使用多少个变形卷积模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
@@ -719,9 +719,11 @@ class CostAgg_CrissCrossAttention(nn.Module):
         # proj_query = self.query_conv(left_feature)
         proj_query = self.query_conv(left_feature[0])
         # [B, C, H, W] -> [B, W, C, H] -> [BW, C, H] -> [BW, H, C]
-        proj_query_H = proj_query.permute(0, 3, 1, 2).contiguous().view(m_batchsize * width, -1, height).permute(0, 2, 1)
+        proj_query_H = proj_query.permute(0, 3, 1, 2).contiguous().view(m_batchsize * width, -1, height).permute(0, 2,
+                                                                                                                 1)
         # [B, C, H, W] -> [B, H, C, W] -> [BH, C, W] -> [BH, W, C]
-        proj_query_W = proj_query.permute(0, 2, 1, 3).contiguous().view(m_batchsize * height, -1, width).permute(0, 2, 1)
+        proj_query_W = proj_query.permute(0, 2, 1, 3).contiguous().view(m_batchsize * height, -1, width).permute(0, 2,
+                                                                                                                 1)
 
         # proj_key = self.key_conv(left_feature)
         proj_key = self.key_conv(left_feature[1])
@@ -764,6 +766,7 @@ class FeatureShrinkModule(nn.Module):
     给用于计算Attention的Feature降维，
     防止出现带着大体积的Feature进Forward的情况，减少显存占用
     """
+
     def __init__(self, num_scales=3):
         super(FeatureShrinkModule, self).__init__()
 
@@ -778,12 +781,12 @@ class FeatureShrinkModule(nn.Module):
             self.query_conv_s.append(nn.Sequential(
                 nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                 nn.BatchNorm2d(self.query_channels[i]),
-                nn.ReLU(inplace=True)))
+                nn.LeakyReLU(0.2, inplace=True)))
             # nn.LeakyReLU(0.2, inplace=True)
             self.key_conv_s.append(nn.Sequential(
                 nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                 nn.BatchNorm2d(self.query_channels[i]),
-                nn.ReLU(inplace=True)))
+                nn.LeakyReLU(0.2, inplace=True)))
 
     def forward(self, left_feature, right_feature=None):
 
@@ -852,8 +855,6 @@ def mix_features(left_key_feature, right_key_feature, feature_similarity, b, c, 
     return mixed_features
 
 
-
-
 class warp_CostAgg_CrissCrossAttention(nn.Module):
     """ Criss-Cross Attention Module"""
 
@@ -874,8 +875,17 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
         self.softmax = nn.Softmax(dim=3)
         self.INF = INF
         # self.gamma = nn.Parameter(torch.zeros(1))
+        self.INF_dict = {}
 
         self.gammaList = nn.ParameterList([nn.Parameter(torch.zeros(1)) for i in range(self.value_chls)])
+
+    def getINF(self, b, h, w):
+
+        if not (w * 100000 + h * 100 + b) in self.INF_dict:
+            # [BW, H, H] -> [B, W, H, H] -> [B, H, W, H]
+            self.INF_dict[w * 100000 + h * 100 + b] = self.INF(b, h, w)
+
+        return self.INF_dict[w * 100000 + h * 100 + b]
 
     def forward(self, cost_volume, left_feature, right_feature=None):
         """
@@ -883,12 +893,16 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
         left_feature, right_feature：降维后的左/右图特征向量(单尺度的)，以左图为例：[query特征, key特征]
         """
         # TODO: working on ...
+        D_max = cost_volume.size(1)
+        assert D_max == self.value_chls, 'D_max == self.value_chls Must holds!'
+        # TODO:当前实验室显卡显存不足，故处理不了1/3分辨率（D_max=64）的代价体。只能尝试只处理1/6, 1/12尺度的代价体
+        if D_max == 64:
+            return cost_volume
+
         left_key_feature = self.left_key_conv(left_feature[1])
         right_key_feature = self.right_key_conv(right_feature[1])
 
         b, c, h, w = left_key_feature.size()
-        D_max = cost_volume.size(1)
-        assert D_max == self.value_chls, 'D_max == self.value_chls Must holds!'
 
         # proj_query = self.query_conv(left_feature)
         proj_query = self.query_conv(left_feature[0])
@@ -906,8 +920,8 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
         mixed_features = mix_features(left_key_feature, right_key_feature, self.feature_similarity, b, c, D_max, h, w)
 
         # 3. 计算Attention
+        aggregated_volume_slices = []
         for i in range(D_max):
-            print(i)
             # 3.1 针对每一个视差值, 计算Attention。因为不同的视差下，右特征图的warp偏移不一样。
             slice_feature = mixed_features[:, :, i, :, :]  # [B, C, D=i, H, W] ->[B, C, H, W]
             # mixed_proj_key = self.left_key_conv(slice_feature)
@@ -918,7 +932,11 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
 
             # 负无穷的作用是：十字交叉Attention对于像素与其自身会计算两层Attention，故需去掉一个。加上负无穷，在Softmax的时候，其权重就会变成0.
             # [BW, H, C] * [BW, C, H] = [BW, H, H]: H维度（垂直方向）上的像素之间的Attention  + [BW, H, H]对角负无穷矩阵  -> [B, H, W, H]
-            energy_H = (torch.bmm(proj_query_H, mixed_proj_key_H) + self.INF(b, h, w)).view(
+            # energy_H = (torch.bmm(proj_query_H, mixed_proj_key_H) + self.INF(b, h, w)).view(
+            #     # [BW, H, H] -> [B, W, H, H] -> [B, H, W, H]
+            #     b, w, h, h).permute(0, 2, 1, 3)
+
+            energy_H = (torch.bmm(proj_query_H, mixed_proj_key_H) + self.getINF(b, h, w)).view(
                 # [BW, H, H] -> [B, W, H, H] -> [B, H, W, H]
                 b, w, h, h).permute(0, 2, 1, 3)
             # [BH, W, C] * [BH, C, W] = [BH, W, W] -> [B, H, W, W]
@@ -939,9 +957,10 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
 
             # 3.3 保存聚合后的代价体Slice
             # cost_volume[B, C/D=i, H, W]
-            cost_volume[:, i:i+1, :, :] = self.gammaList[i] * (out_H + out_W) + cost_volume[:, i:i+1, :, :]
+            # cost_volume[:, i:i+1, :, :] = self.gammaList[i] * (out_H + out_W) + cost_volume[:, i:i+1, :, :]
+            aggregated_volume_slices.append(self.gammaList[i] * (out_H + out_W) + cost_volume[:, i:i + 1, :, :])
 
-        return cost_volume
+        return torch.cat(aggregated_volume_slices, dim=1)
 
         # # 对代价体的每一个Slice进行处理：[B, D=i, H, W]
         # for i in range(D_max):
