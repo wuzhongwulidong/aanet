@@ -97,6 +97,7 @@ class StereoDataset(Dataset):
             sample['left'] = os.path.join(data_dir, left_img)
             sample['right'] = os.path.join(data_dir, right_img)
             sample['disp'] = os.path.join(data_dir, gt_disp) if gt_disp is not None else None
+            # sample['disp'] = os.path.join(data_dir, gt_disp.replace('left', 'right')) if gt_disp is not None else None
 
             if load_pseudo_gt and sample['disp'] is not None:
                 # KITTI 2015

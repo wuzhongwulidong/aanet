@@ -61,7 +61,8 @@ def saveImgErrorAnalysis(index, img_name, dstPath, dstName, left, right, gt_disp
     :return:    """
     assert left.size(0) == 1  # [1, C, H ,W]
     # 控制保存图片的数量：SceneFlow的测试集
-    if index not in [10, 50, 100, 150, 200, 728, 1456, 2184, 2912, 3640] and index not in range(0, 3470, 100):
+    if index not in [10, 50, 100, 150, 200, 728, 1456, 2184, 2912, 3640] and index not in range(0, 3470, 100) \
+            and index not in [256, 257]:
         return
 
     # 注意参与网络训练的图像是做了归一化的。为了使图像开起来更自然，这里去归一化。

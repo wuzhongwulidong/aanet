@@ -254,3 +254,5 @@ FlyingThings3D/frames_finalpass/TEST/A/0062/left/0008.png FlyingThings3D/frames_
 FlyingThings3D/frames_finalpass/TEST/A/0148/left/0009.png FlyingThings3D/frames_finalpass/TEST/A/0148/right/0009.png FlyingThings3D/disparity/TEST/A/0148/left/0009.pfm
 FlyingThings3D/frames_finalpass/TEST/A/0079/left/0007.png FlyingThings3D/frames_finalpass/TEST/A/0079/right/0007.png FlyingThings3D/disparity/TEST/A/0079/left/0007.pfm
 FlyingThings3D/frames_finalpass/TEST/C/0069/left/0012.png FlyingThings3D/frames_finalpass/TEST/C/0069/right/0012.png FlyingThings3D/disparity/TEST/C/0069/left/0012.pfm
+myModified/frames_finalpass/TEST/C/0076/left/0006_left_make_high_contrast.png myModified/frames_finalpass/TEST/C/0076/right/0006_right_erase_corner.png FlyingThings3D/disparity/TEST/C/0076/left/0006.pfm
+FlyingThings3D/frames_finalpass/TEST/C/0076/left/0006.png FlyingThings3D/frames_finalpass/TEST/C/0076/right/0006.png FlyingThings3D/disparity/TEST/C/0076/left/0006.pfm

@@ -220,9 +220,9 @@ class AANet(nn.Module):
         disparity_pyramid += self.disparity_refinement(left_img, right_img,
                                                        disparity_pyramid[-1])
 
-        # disparity_pyramid.append(F.interpolate(disparity_pyramid[-1].unsqueeze(1), scale_factor=1.5,
+        # disparity_pyramid.append(1.5 * F.interpolate(disparity_pyramid[-1].unsqueeze(1), scale_factor=1.5,
         #                                    mode='bilinear', align_corners=False).squeeze(1))
-        # disparity_pyramid.append(F.interpolate(disparity_pyramid[-2].unsqueeze(1), scale_factor=3,
+        # disparity_pyramid.append(3 * F.interpolate(disparity_pyramid[-2].unsqueeze(1), scale_factor=3,
         #                                    mode='bilinear', align_corners=False).squeeze(1))
 
 
