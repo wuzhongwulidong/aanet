@@ -63,7 +63,7 @@ class StereoDataset(Dataset):
 
         kitti_mix_dict = {
             'train': '{}/KITTI_mix.txt'.format(nameFileDir),
-            'test': '{}/KITTI_2015_test.txt'.format(nameFileDir)
+            'test': '{}/KITTI_2015_test.txt'.format(nameFileDir),
         }
 
         dataset_name_dict = {
