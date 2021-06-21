@@ -7,7 +7,7 @@ python train.py \
 --debug_overFit_train 2 \
 --useFeatureAtt 1 \
 --accumulation_steps 1 \
---checkpoint_dir checkpoints/attention_aanet_train_sceneflow \
+--checkpoint_dir checkpoints/attention_costAgg_sceneflow \
 --batch_size 4 \
 --val_batch_size 1 \
 --img_height 288 \

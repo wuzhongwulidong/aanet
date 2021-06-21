@@ -483,8 +483,8 @@ class myAttentionCostAggregation(nn.Module):
 
         # 需要调节的参数
         num_fusions = 4         # 共多少级处理
-        num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
         num_attention_blocks = 2 # 在num_fusions级中，使用多少个Attention代价聚合模块
+        num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
@@ -813,7 +813,7 @@ class CostAgg_CrissCrossAttention(nn.Module):
         out_H = torch.bmm(proj_value_H, att_H.permute(0, 2, 1)).view(m_batchsize,width,-1,height).permute(0,2,3,1)
         # value[BH, C, W] * (Attention[BH, W, W]->[BH, W, W]) -> [B, H, C, W]-> [B, C, H, W]
         out_W = torch.bmm(proj_value_W, att_W.permute(0, 2, 1)).view(m_batchsize,height,-1,width).permute(0,2,1,3)
-        #print(out_H.size(),out_W.size())
+        # print(out_H.size(),out_W.size())
         return self.gamma * (out_H + out_W) + cost_volume
 
 
