@@ -482,9 +482,9 @@ class myAttentionCostAggregation(nn.Module):
         mdconv_dilation = 2    # 无用参数
 
         # 需要调节的参数
-        num_fusions = 4         # 共多少级处理
-        num_attention_blocks = 2 # 在num_fusions级中，使用多少个Attention代价聚合模块
-        num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
+        num_fusions = 6         # 共多少级处理
+        num_attention_blocks = 3  # 在num_fusions级中，使用多少个Attention代价聚合模块
+        num_deform_blocks = 3  # 在num_fusions级中，使用多少个变形卷积模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
         self.num_scales = num_scales
@@ -732,10 +732,10 @@ class FeatureShrinkModule(nn.Module):
         for i in range(self.num_scales):
             self.query_conv_s.append(nn.Sequential(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                                                    nn.BatchNorm2d(self.query_channels[i]),
-                                                   nn.ReLU(inplace=True)))
+                                                   nn.LeakyReLU(inplace=True)))
             self.key_conv_s.append(nn.Sequential(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                                                  nn.BatchNorm2d(self.query_channels[i]),
-                                                 nn.ReLU(inplace=True)))
+                                                 nn.LeakyReLU(inplace=True)))
 
     def forward(self, left_feature, right_feature=None):
 
