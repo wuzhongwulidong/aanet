@@ -16,9 +16,9 @@ def epe_metric(d_est, d_gt, mask, use_np=False):
 
 def d1_metric(d_est, d_gt, mask, use_np=False):
     """
-     D1指标：错误视差的比例
+     D1-all指标：错误视差的比例
      1. 误差绝对值大于3，且误差超过真实值5%，则认为是错误的预测结果。否则认为是正确的预测结果.
-     2. 错误预测的像素占总像素个数的比例，即为D1指标。
+     2. 错误预测的像素占总像素个数的比例，即为D1-all指标。
     """
     d_est, d_gt = d_est[mask], d_gt[mask]
     if use_np:

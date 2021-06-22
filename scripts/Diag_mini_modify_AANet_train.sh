@@ -49,7 +49,7 @@ python train.py \
 --milestones 400,600,800,900 \
 --max_epoch 1000 \
 --save_ckpt_freq 100 \
---no_validate
+#--no_validate
 ## 2>&1 |tee logs/log_train_aanet_train_KITTI_mix.txt
 
 ## Train on KITTI 2015 training set：利用在SceneFlow上模型（我的Diag_mini_modify），进行fine-tune：
