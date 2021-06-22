@@ -732,10 +732,10 @@ class FeatureShrinkModule(nn.Module):
         for i in range(self.num_scales):
             self.query_conv_s.append(nn.Sequential(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                                                    nn.BatchNorm2d(self.query_channels[i]),
-                                                   nn.LeakyReLU(inplace=True)))
+                                                   nn.LeakyReLU(0.2, inplace=True)))
             self.key_conv_s.append(nn.Sequential(nn.Conv2d(in_channels=self.in_channels[i], out_channels=self.query_channels[i], kernel_size=1),
                                                  nn.BatchNorm2d(self.query_channels[i]),
-                                                 nn.LeakyReLU(inplace=True)))
+                                                 nn.LeakyReLU(0.2, inplace=True)))
 
     def forward(self, left_feature, right_feature=None):
 
