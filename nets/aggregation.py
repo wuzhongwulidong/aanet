@@ -482,8 +482,8 @@ class myAttentionCostAggregation(nn.Module):
         mdconv_dilation = 2    # 无用参数
 
         # 需要调节的参数
-        num_fusions = 6         # 共多少级处理
-        num_attention_blocks = 3  # 在num_fusions级中，使用多少个Attention代价聚合模块
+        num_fusions = 5         # 共多少级处理
+        num_attention_blocks = 2  # 在num_fusions级中，使用多少个Attention代价聚合模块
         num_deform_blocks = 3  # 在num_fusions级中，使用多少个变形卷积模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
