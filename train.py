@@ -265,7 +265,8 @@ def main():
                     logger.info('train_loader.sampler.set_epoch({})'.format(epoch))
                 train_model.train(train_loader, local_master, trainLoss_dict, trainLossKey)
 
-            kittiMixVal = "KITTI_mix" != args.dataset_name or ((epoch + 1) % 5 == 0 or epoch+1 == 1)
+            kittiMixVal = ("KITTI_mix" != args.dataset_name and "KITTI2015" != args.dataset_name) \
+                or ((epoch + 1) % 5 == 0 or epoch+1 == 1)
             if not args.no_validate and args.debug_overFit_train != 1 and kittiMixVal:
                 train_model.validate(val_loader, local_master, valLoss_dict, valLossKey)  # 训练模式下：边训练边验证。
             if args.lr_scheduler_type is not None:
