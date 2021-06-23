@@ -82,7 +82,7 @@
 python train.py \
 --data_dir data/KITTI/kitti_2015/data_scene_flow \
 --dataset_name KITTI2015 \
---mode train_all \
+--mode val \
 --debug_overFit_train 2 \
 --checkpoint_dir checkpoints/Diag_mini_modify_kitti15 \
 --pretrained_aanet checkpoints/Diag_mini_modify_kittimix/aanet_best_367764f7.pth \
