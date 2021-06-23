@@ -61,9 +61,16 @@ class StereoDataset(Dataset):
             'test': '{}/KITTI_2015_test.txt'.format(nameFileDir)
         }
 
+        # 原代码
+        # kitti_mix_dict = {
+        #     'train': '{}/KITTI_mix.txt'.format(nameFileDir),
+        #     'test': '{}/KITTI_2015_test.txt'.format(nameFileDir),
+        # }
+
+        # 为了监视训练过程，抠出KITTI2015中的40张图片作为验证集
         kitti_mix_dict = {
-            'train': '{}/KITTI_mix.txt'.format(nameFileDir),
-            'test': '{}/KITTI_2015_test.txt'.format(nameFileDir),
+            'train': '{}/KITTI_myMix.txt'.format(nameFileDir),
+            'val': '{}/KITTI_mix_myVal.txt'.format(nameFileDir),
         }
 
         dataset_name_dict = {
