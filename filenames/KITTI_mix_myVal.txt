@@ -36,5 +36,3 @@ kitti_2015/data_scene_flow/training/image_2/000170_10.png kitti_2015/data_scene_
 kitti_2015/data_scene_flow/training/image_2/000175_10.png kitti_2015/data_scene_flow/training/image_3/000175_10.png kitti_2015/data_scene_flow/training/disp_occ_0/000175_10.png
 kitti_2015/data_scene_flow/training/image_2/000180_10.png kitti_2015/data_scene_flow/training/image_3/000180_10.png kitti_2015/data_scene_flow/training/disp_occ_0/000180_10.png
 kitti_2015/data_scene_flow/training/image_2/000185_10.png kitti_2015/data_scene_flow/training/image_3/000185_10.png kitti_2015/data_scene_flow/training/disp_occ_0/000185_10.png
-kitti_2015/data_scene_flow/training/image_2/000190_10.png kitti_2015/data_scene_flow/training/image_3/000190_10.png kitti_2015/data_scene_flow/training/disp_occ_0/000190_10.png
-kitti_2015/data_scene_flow/training/image_2/000195_10.png kitti_2015/data_scene_flow/training/image_3/000195_10.png kitti_2015/data_scene_flow/training/disp_occ_0/000195_10.png
