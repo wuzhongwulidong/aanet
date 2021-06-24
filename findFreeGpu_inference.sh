@@ -24,7 +24,8 @@ do
 	  #Get the size of used memory, MB.
       usedSize=$(echo $elem | tr -cd "[0-9]")
       # Available Memory on this gpu. unit MB.
-      freeSize=$((12196-usedSize))
+#      freeSize=$((12196-usedSize))
+      freeSize=$((24259-usedSize))
       echo $freeSize
    
       # if
