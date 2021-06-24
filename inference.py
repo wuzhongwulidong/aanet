@@ -164,8 +164,11 @@ def main():
             right_pad = args.img_width - ori_width
 
             # Pad size: (left_pad, right_pad, top_pad, bottom_pad)
-            left = F.pad(left, (0, right_pad, top_pad, 0))
-            right = F.pad(right, (0, right_pad, top_pad, 0))
+            # left = F.pad(left, (0, right_pad, top_pad, 0))
+            # right = F.pad(right, (0, right_pad, top_pad, 0))
+            # modified by wuzhong
+            left = F.pad(left, (0, right_pad, top_pad, 0), mode="reflect")
+            right = F.pad(right, (0, right_pad, top_pad, 0), mode="reflect")
 
         # Warpup
         if i == 0 and args.count_time:

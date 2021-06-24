@@ -17,7 +17,7 @@ python inference.py \
 --mode test \
 --data_dir data/KITTI/kitti_2015/data_scene_flow \
 --dataset_name KITTI2015 \
---pretrained_aanet checkpoints/Diag_mini_modify_kitti15/aanet_latest.pth \
+--pretrained_aanet myTrainedModels/aanet_best_d1_61f9a784.pth \
 --batch_size 1 \
 --img_height 384 \
 --img_width 1248 \
