@@ -303,6 +303,7 @@ class Model(object):
             right = sample['right'].to(self.device)
             gt_disp = sample['disp'].to(self.device)  # [B, H, W]
             mask = (gt_disp > 0) & (gt_disp < args.max_disp)
+            # mask = (gt_disp > 0) & (gt_disp < 230)
 
             if not mask.any():
                 continue

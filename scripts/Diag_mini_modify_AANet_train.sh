@@ -79,12 +79,43 @@
 
 #
 ## Train on KITTI 2015 training set：利用上述混合训练的结果，进行fine-tune
+#python train.py \
+#--data_dir data/KITTI/kitti_2015/data_scene_flow \
+#--dataset_name KITTI2015 \
+#--mode val \
+#--debug_overFit_train 2 \
+#--checkpoint_dir checkpoints/Diag_mini_modify_kitti15 \
+#--pretrained_aanet myTrainedModels/aanet_best_kittimix_9345941b.pth \
+#--batch_size 4 \
+#--accumulation_steps 1 \
+#--val_batch_size 1 \
+#--img_height 336 \
+#--img_width 720 \
+#--val_img_height 384 \
+#--val_img_width 1248 \
+#--feature_type aanet \
+#--feature_pyramid_network \
+#--load_pseudo_gt \
+#--highest_loss_only \
+#--learning_rate 1e-4 \
+#--milestones 400,600,800,900 \
+#--max_epoch 1000 \
+#--save_ckpt_freq 100 \
+#
+##原文的训练尺寸等参数：
+##--no_validate
+##--mode train_all \
+##--img_height 336 \
+##--img_width 960 \
+## 2>&1 |tee logs/log_train_aanet_train_KITTI2015.txt
+#
+## Train on KITTI 2012 training set：利用上述混合训练的结果，进行fine-tune
 python train.py \
---data_dir data/KITTI/kitti_2015/data_scene_flow \
---dataset_name KITTI2015 \
+--data_dir data/KITTI/kitti_2012/data_stereo_flow \
+--dataset_name KITTI2012 \
 --mode val \
 --debug_overFit_train 2 \
---checkpoint_dir checkpoints/Diag_mini_modify_kitti15 \
+--checkpoint_dir checkpoints/aanet_kitti12 \
 --pretrained_aanet myTrainedModels/aanet_best_kittimix_9345941b.pth \
 --batch_size 4 \
 --accumulation_steps 1 \
@@ -100,35 +131,5 @@ python train.py \
 --learning_rate 1e-4 \
 --milestones 400,600,800,900 \
 --max_epoch 1000 \
---save_ckpt_freq 100 \
-#
-##原文的训练尺寸等参数：
-##--no_validate
-##--mode train_all \
-##--img_height 336 \
-##--img_width 960 \
-## 2>&1 |tee logs/log_train_aanet_train_KITTI2015.txt
-#
-## Train on KITTI 2012 training set：利用上述混合训练的结果，进行fine-tune
-#python train.py \
-#--data_dir data/KITTI/kitti_2012/data_stereo_flow \
-#--dataset_name KITTI2012 \
-#--mode train_all \
-#--checkpoint_dir checkpoints/aanet_kitti12 \
-#--pretrained_aanet checkpoints/aanet_kittimix/aanet_latest.pth \
-#--batch_size 6 \
-#--accumulation_steps 1 \
-#--val_batch_size 6 \
-#--img_height 336 \
-#--img_width 960 \
-#--val_img_height 384 \
-#--val_img_width 1248 \
-#--feature_type aanet \
-#--feature_pyramid_network \
-#--load_pseudo_gt \
-#--highest_loss_only \
-#--learning_rate 1e-4 \
-#--milestones 400,600,800,900 \
-#--max_epoch 1000 \
 #--save_ckpt_freq 100 \
 #--no_validate 2>&1 |tee logs/log_train_aanet_train_KITTI2012.txt
