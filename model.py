@@ -26,6 +26,9 @@ class Model(object):
         self.best_epe = 999. if best_epe is None else best_epe
         self.best_epoch = -1 if best_epoch is None else best_epoch
 
+        self.best_d1 = 999.
+        self.best_epoch_d1 = -1
+
         if not args.evaluate_only or args.mode == 'test':
             self.train_writer = SummaryWriter(os.path.join(self.args.checkpoint_dir, "tensorBoardData"))
 
@@ -402,29 +405,51 @@ class Model(object):
             self.train_writer.add_scalar('val/thres20', mean_thres20, self.epoch)
 
         if not args.evaluate_only:
-            if args.val_metric == 'd1':
-                if mean_d1 < self.best_epe:
-                    # Actually best_epe here is d1
-                    self.best_epe = mean_d1
-                    self.best_epoch = self.epoch
+            if mean_d1 < self.best_d1:
+                # Actually best_epe here is d1
+                self.best_d1 = mean_d1
+                self.best_epoch_d1 = self.epoch
 
-                    utils.save_checkpoint(args.checkpoint_dir, self.optimizer, self.aanet,
-                                          epoch=self.epoch, num_iter=self.num_iter,
-                                          epe=mean_d1, best_epe=self.best_epe,
-                                          best_epoch=self.best_epoch,
-                                          filename='aanet_best.pth') if local_master else None
-            elif args.val_metric == 'epe':
-                if mean_epe < self.best_epe:
-                    self.best_epe = mean_epe
-                    self.best_epoch = self.epoch
+                utils.save_checkpoint(args.checkpoint_dir, self.optimizer, self.aanet,
+                                      epoch=self.epoch, num_iter=self.num_iter,
+                                      epe=mean_d1, best_epe=self.best_epe,
+                                      best_epoch=self.best_epoch_d1,
+                                      filename='aanet_best_d1.pth') if local_master else None
 
-                    utils.save_checkpoint(args.checkpoint_dir, self.optimizer, self.aanet,
-                                          epoch=self.epoch, num_iter=self.num_iter,
-                                          epe=mean_epe, best_epe=self.best_epe,
-                                          best_epoch=self.best_epoch,
-                                          filename='aanet_best.pth') if local_master else None
-            else:
-                raise NotImplementedError
+            if mean_epe < self.best_epe:
+                self.best_epe = mean_epe
+                self.best_epoch = self.epoch
+
+                utils.save_checkpoint(args.checkpoint_dir, self.optimizer, self.aanet,
+                                      epoch=self.epoch, num_iter=self.num_iter,
+                                      epe=mean_epe, best_epe=self.best_epe,
+                                      best_epoch=self.best_epoch,
+                                      filename='aanet_best.pth') if local_master else None
+
+
+            # if args.val_metric == 'd1':
+            #     if mean_d1 < self.best_epe:
+            #         # Actually best_epe here is d1
+            #         self.best_epe = mean_d1
+            #         self.best_epoch = self.epoch
+            #
+            #         utils.save_checkpoint(args.checkpoint_dir, self.optimizer, self.aanet,
+            #                               epoch=self.epoch, num_iter=self.num_iter,
+            #                               epe=mean_d1, best_epe=self.best_epe,
+            #                               best_epoch=self.best_epoch,
+            #                               filename='aanet_best.pth') if local_master else None
+            # elif args.val_metric == 'epe':
+            #     if mean_epe < self.best_epe:
+            #         self.best_epe = mean_epe
+            #         self.best_epoch = self.epoch
+            #
+            #         utils.save_checkpoint(args.checkpoint_dir, self.optimizer, self.aanet,
+            #                               epoch=self.epoch, num_iter=self.num_iter,
+            #                               epe=mean_epe, best_epe=self.best_epe,
+            #                               best_epoch=self.best_epoch,
+            #                               filename='aanet_best.pth') if local_master else None
+            # else:
+            #     raise NotImplementedError
 
         if self.epoch == args.max_epoch:
             # Save best validation results
