@@ -482,9 +482,9 @@ class myAttentionCostAggregation(nn.Module):
         mdconv_dilation = 2  # 无用参数
 
         # 需要调节的参数
-        num_fusions = 5  # 共多少级处理
+        num_fusions = 4  # 共多少级处理
         num_warp_attention_blocks = 1  # 在num_fusions级中，使用多少个warp_Attention代价聚合模块
-        num_attention_blocks = 2 + num_warp_attention_blocks  # 在num_fusions级中，使用多少个Attention代价聚合模块
+        num_attention_blocks = 1 + num_warp_attention_blocks  # 在num_fusions级中，使用多少个Attention代价聚合模块
         num_deform_blocks = 2  # 在num_fusions级中，使用多少个变形卷积模块
 
         self.max_disp = max_disp  # 最高分辨率代价体的最大视差
@@ -502,7 +502,7 @@ class myAttentionCostAggregation(nn.Module):
 
             # simple_bottleneck_module: 0.warp_attention, 1.Attention代价聚合。2.变形卷积
             if i < num_warp_attention_blocks:
-                # num_fusions级处理中，前面的num_warp_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=1）
+                # num_fusions级处理中，前面的num_warp_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=0）
                 simple_bottleneck_module = 0
             elif i < num_attention_blocks:
                 # num_fusions级处理中，前面的num_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=1）
@@ -901,8 +901,8 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
         D_max = cost_volume.size(1)
         assert D_max == self.value_chls, 'D_max == self.value_chls Must holds!'
         # TODO:当前实验室显卡显存不足，故处理不了1/3分辨率（D_max=64）的代价体。只能尝试只处理1/6, 1/12尺度的代价体
-        if D_max == 64:
-            return cost_volume
+        # if D_max == 64:
+        #     return cost_volume
 
         left_key_feature = self.left_key_conv(left_feature[1])
         right_key_feature = self.right_key_conv(right_feature[1])
