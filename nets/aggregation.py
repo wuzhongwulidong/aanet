@@ -500,16 +500,29 @@ class myAttentionCostAggregation(nn.Module):
             else:
                 num_out_branches = 1 if i == num_fusions - 1 else self.num_scales
 
+            # # simple_bottleneck_module: 0.warp_attention, 1.Attention代价聚合。2.变形卷积
+            # if i < num_warp_attention_blocks:
+            #     # num_fusions级处理中，前面的num_warp_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=0）
+            #     simple_bottleneck_module = 0
+            # elif i < num_attention_blocks:
+            #     # num_fusions级处理中，前面的num_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=1）
+            #     simple_bottleneck_module = 1
+            # else:
+            #     # num_fusions级处理中，最后的num_deform_blocks级使用变形卷积（simple_bottleneck_module=2）
+            #     simple_bottleneck_module = 2
+
             # simple_bottleneck_module: 0.warp_attention, 1.Attention代价聚合。2.变形卷积
-            if i < num_warp_attention_blocks:
+            if i in [0, 1]:
                 # num_fusions级处理中，前面的num_warp_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=0）
                 simple_bottleneck_module = 0
-            elif i < num_attention_blocks:
+            elif i in []:
                 # num_fusions级处理中，前面的num_attention_blocks级使用Attention代价聚合（simple_bottleneck_module=1）
                 simple_bottleneck_module = 1
-            else:
+            elif i in [2, 3]:
                 # num_fusions级处理中，最后的num_deform_blocks级使用变形卷积（simple_bottleneck_module=2）
                 simple_bottleneck_module = 2
+            else:
+                raise NotImplementedError
 
             fusions.append(myAttentionCostAggModule(num_scales=self.num_scales,
                                                     num_output_branches=num_out_branches,
@@ -908,6 +921,8 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
         right_key_feature = self.right_key_conv(right_feature[1])
 
         b, c, h, w = left_key_feature.size()
+        d_root = c ** -0.5
+        # d_root = 1.0
 
         # proj_query = self.query_conv(left_feature)
         proj_query = self.query_conv(left_feature[0])
@@ -941,11 +956,13 @@ class warp_CostAgg_CrissCrossAttention(nn.Module):
             #     # [BW, H, H] -> [B, W, H, H] -> [B, H, W, H]
             #     b, w, h, h).permute(0, 2, 1, 3)
 
-            energy_H = (torch.bmm(proj_query_H, mixed_proj_key_H) + self.getINF(b, h, w)).view(
+            # TODO: 此处考虑除以d_root
+            energy_H = (torch.bmm(proj_query_H, mixed_proj_key_H) * d_root + self.getINF(b, h, w)).view(
                 # [BW, H, H] -> [B, W, H, H] -> [B, H, W, H]
                 b, w, h, h).permute(0, 2, 1, 3)
+            # TODO: 此处考虑除以d_root
             # [BH, W, C] * [BH, C, W] = [BH, W, W] -> [B, H, W, W]
-            energy_W = torch.bmm(proj_query_W, mixed_proj_key_W).view(b, h, w, w)
+            energy_W = torch.bmm(proj_query_W, mixed_proj_key_W).view(b, h, w, w) * d_root
             # [B, H, W, H] || [B, H, W, W] -> [B, H, W, H+W] -> 在最后一维上做Softmax
             concate = self.softmax(torch.cat([energy_H, energy_W], 3))
 
