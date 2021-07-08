@@ -20,6 +20,8 @@ python train.py \
 --max_epoch 64 \
 --evaluate_only
 
+#--checkpoint_dir checkpoints/aanet+_sceneflow \
+#--pretrained_aanet author_pretrained_models/aanet+_sceneflow-d3e13ef0.pth \
 
 # Evaluate a specific model on Scene Flow test set
 #CUDA_VISIBLE_DEVICES=0 python train.py \

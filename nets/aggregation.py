@@ -317,7 +317,7 @@ class GCNetAggregation(nn.Module):
 class AdaptiveAggregationModule(nn.Module):
     def __init__(self, num_scales, num_output_branches, max_disp,
                  num_blocks=1,
-                 simple_bottleneck=False,
+                 simple_bottleneck=None,
                  deformable_groups=2,
                  mdconv_dilation=2):
         super(AdaptiveAggregationModule, self).__init__()
@@ -334,13 +334,16 @@ class AdaptiveAggregationModule(nn.Module):
             num_candidates = max_disp // (2 ** i)
             branch = nn.ModuleList()
             for j in range(num_blocks):
-                if simple_bottleneck:
-                    # branch.append(SimpleBottleneck(num_candidates, num_candidates))
+                if simple_bottleneck == 0:
+                    branch.append(SimpleBottleneck(num_candidates, num_candidates))
+                elif simple_bottleneck == 1:
                     branch.append(myDiagSimpleBottleneck(num_candidates, num_candidates))
-                else:
+                elif simple_bottleneck == 2:
                     branch.append(DeformSimpleBottleneck(num_candidates, num_candidates, modulation=True,
                                                          mdconv_dilation=mdconv_dilation,
                                                          deformable_groups=deformable_groups))
+                else:
+                    raise NotImplementedError
 
             self.branches.append(nn.Sequential(*branch))
 
@@ -430,10 +433,39 @@ class AdaptiveAggregation(nn.Module):
             else:
                 num_out_branches = 1 if i == num_fusions - 1 else self.num_scales
 
-            if i >= num_fusions - num_deform_blocks:
-                simple_bottleneck_module = False
-            else:
-                simple_bottleneck_module = True
+            # commented by wuzhong 2021-07-08
+            # if i >= num_fusions - num_deform_blocks:
+            #     simple_bottleneck_module = False
+            # else:
+            #     simple_bottleneck_module = True
+
+            # # 原文代码等价于：
+            # if i in [0, 1, 2]:
+            #     # SimpleBottleneck
+            #     simple_bottleneck_module = 0
+            # elif i in [3, 4, 5]:
+            #     # DeformSimpleBottleneck
+            #     simple_bottleneck_module = 2
+
+            # # Diag_mini_modify_AANet等价于：
+            # if i in [0, 1, 2]:
+            #     # myDiagSimpleBottleneck：我的对角线卷积模块
+            #     simple_bottleneck_module = 1
+            # elif i in [3, 4, 5]:
+            #     # DeformSimpleBottleneck
+            #     simple_bottleneck_module = 2
+
+            # added by wuzhong 2021-07-08
+            # # Diag_mini_modify_AANet+：测试1个对角卷积层+2个普通卷积层+3个变形卷积层
+            if i in [1, 2]:
+                # SimpleBottleneck
+                simple_bottleneck_module = 0
+            elif i in [0]:
+                # myDiagSimpleBottleneck：我的对角线卷积模块
+                simple_bottleneck_module = 1
+            elif i in [3, 4, 5]:
+                # DeformSimpleBottleneck
+                simple_bottleneck_module = 2
 
             fusions.append(AdaptiveAggregationModule(num_scales=self.num_scales,
                                                      num_output_branches=num_out_branches,

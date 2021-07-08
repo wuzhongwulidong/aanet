@@ -71,6 +71,3 @@ echo "Enough free GPUs detected, going to using GPU id: $CUDA_VISIBLE_DEVICES"
 dos2unix $targetShell
 
 source $targetShell
-
-
-
