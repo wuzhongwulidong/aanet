@@ -113,6 +113,15 @@ class AANet(nn.Module):
         elif aggregation_type == 'AttentionCostAggregation':
             # self.aggregation = myDiagAggregation(max_disp=max_disp)
             # self.aggregation = myBranchDiagAggregation(max_disp=max_disp)
+
+            aanet_or_plus = "aanet"
+            if self.feature_pyramid_network:
+                aanet_or_plus = "aanet"
+            elif self.feature_pyramid:
+                aanet_or_plus = "aanet+"
+            else:
+                raise NotImplementedError
+
             self.aggregation = myAttentionCostAggregation(max_disp=max_disp,
                                                           num_scales=num_scales,
                                                           num_fusions=num_fusions,
@@ -120,8 +129,9 @@ class AANet(nn.Module):
                                                           num_deform_blocks=num_deform_blocks,
                                                           mdconv_dilation=mdconv_dilation,
                                                           deformable_groups=deformable_groups,
-                                                          intermediate_supervision=not no_intermediate_supervision)
-            self.FeatureShrink = FeatureShrinkModule(num_scales=num_scales)
+                                                          intermediate_supervision=not no_intermediate_supervision,
+                                                          aanet_or_plus=aanet_or_plus)
+            self.FeatureShrink = FeatureShrinkModule(num_scales=num_scales, aanet_or_plus=aanet_or_plus)
 
         else:
             raise NotImplementedError
@@ -157,7 +167,7 @@ class AANet(nn.Module):
         feature = self.feature_extractor(img)  # H/3, H/6, H/12, 通道数分别为：128, 256, 512
         if self.feature_pyramid_network or self.feature_pyramid:
             feature = self.fpn(feature)
-        return feature  # H/3, H/6, H/12, 统一都为：128, 128, 128
+        return feature  # H/3, H/6, H/12, feature_pyramid_network:特征通道数 128, 128, 128. feature_pyramid特征通道数 32, 64, 128
 
     def cost_volume_construction(self, left_feature, right_feature):
         cost_volume = self.cost_volume(left_feature, right_feature)
@@ -226,6 +236,7 @@ class AANet(nn.Module):
         return disparity_pyramid
 
     def forward(self, left_img, right_img):
+        # H/3, H/6, H/12, feature_pyramid_network(AANet):特征通道数 128, 128, 128. feature_pyramid(AANet+)特征通道数 32, 64, 128
         left_feature = self.feature_extraction(left_img)  # H/3,H/6,H/12, 通道数分别为：128,256,512
         right_feature = self.feature_extraction(right_img)
 

@@ -472,7 +472,8 @@ class myAttentionCostAggregation(nn.Module):
                  num_deform_blocks=2,  # 在num_fusions级中，共有多少个是特殊模块（Attention代价聚合）
                  intermediate_supervision=True,
                  deformable_groups=2,
-                 mdconv_dilation=2):
+                 mdconv_dilation=2,
+                 aanet_or_plus=None):
         super(myAttentionCostAggregation, self).__init__()
         # 在这里调节参数
         num_scales = 3
@@ -508,12 +509,13 @@ class myAttentionCostAggregation(nn.Module):
                 simple_bottleneck_module = 2
 
             fusions.append(myAttentionCostAggModule(num_scales=self.num_scales,
-                                                     num_output_branches=num_out_branches,
-                                                     max_disp=max_disp,
-                                                     num_blocks=num_stage_blocks,
-                                                     mdconv_dilation=mdconv_dilation,
-                                                     deformable_groups=deformable_groups,
-                                                     simple_bottleneck=simple_bottleneck_module))
+                                                    num_output_branches=num_out_branches,
+                                                    max_disp=max_disp,
+                                                    num_blocks=num_stage_blocks,
+                                                    mdconv_dilation=mdconv_dilation,
+                                                    deformable_groups=deformable_groups,
+                                                    simple_bottleneck=simple_bottleneck_module,
+                                                    aanet_or_plus=aanet_or_plus))
 
         self.fusions = nn.Sequential(*fusions)
 
@@ -549,15 +551,20 @@ class myAttentionCostAggModule(nn.Module):
                  num_blocks=1,
                  simple_bottleneck=0,
                  deformable_groups=2,
-                 mdconv_dilation=2):
+                 mdconv_dilation=2,
+                 aanet_or_plus=None):
         super(myAttentionCostAggModule, self).__init__()
 
         self.num_scales = num_scales
         self.max_disp = max_disp
         self.num_blocks = num_blocks
         self.num_output_branches = num_output_branches
-        self.feature_channels = [64, 48, 32]  # 特征的通道数: 已在进入代价聚合模块之前，进行了降维
         self.simple_bottleneck = simple_bottleneck
+
+        if aanet_or_plus == "aanet":
+            self.feature_channels = [64, 48, 32]  # 特征的通道数: 已在进入代价聚合模块之前，进行了降维
+        elif aanet_or_plus == "aanet+":
+            self.feature_channels = [32, 32, 64]
 
         # 基于Attention的尺度内代价聚合
         self.branches = nn.ModuleList()            # 一个尺度，一个branch
@@ -719,13 +726,17 @@ class FeatureShrinkModule(nn.Module):
     给用于计算Attention的Feature降维，
     防止出现带着大体积的Feature进Forward的情况，减少显存占用
     """
-    def __init__(self, num_scales=3):
+    def __init__(self, num_scales=3, aanet_or_plus=None):
         super(FeatureShrinkModule, self).__init__()
 
-        self.in_channels = [128, 128, 128]  # AANet的特征提取模块，固定为128通道
+        if aanet_or_plus == "aanet":
+            self.in_channels = [128, 128, 128]  # AANet的特征提取模块，固定为128通道
+            self.query_channels = [64, 48, 32]  # TODO: 在此处调节Attention的通道数, 目的是降低后续在计算Attention时计算量过大
+        elif aanet_or_plus == "aanet+":
+            self.in_channels = [32, 64, 128]  # AANet的特征提取模块，固定为128通道
+            self.query_channels = [32, 32, 64]
+
         self.num_scales = num_scales
-        # TODO: 在此处调节Attention的通道数, 目的是降低后续在计算Attention时计算量过大
-        self.query_channels = [64, 48, 32]
 
         self.query_conv_s = nn.ModuleList()
         self.key_conv_s = nn.ModuleList()
@@ -802,7 +813,7 @@ class CostAgg_CrissCrossAttention(nn.Module):
         # [BH, W, C] * [BH, C, W] = [BH, W, W] -> [B, H, W, W]
         energy_W = torch.bmm(proj_query_W, proj_key_W).view(m_batchsize,height,width,width)
         # [B, H, W, H] || [B, H, W, W] -> [B, H, W, H+W] -> 在最后一维上做Softmax
-        concate = self.softmax(torch.cat([energy_H, energy_W], 3))
+        concate = self.softmax(torch.cat([energy_H, energy_W], 3))  # 在softmax之前，除以sqrt(通道数)？
 
         # [B, H, W, H + W]取出[B, H, W, 0:H]->[B, W, H, H]-> [BW, H, H]
         att_H = concate[:,:,:,0:height].permute(0,2,1,3).contiguous().view(m_batchsize*width,height,height)
